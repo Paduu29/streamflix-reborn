@@ -22,6 +22,7 @@ import com.streamflixreborn.streamflix.utils.SubDL
 class PlayerViewModel(
     videoType: Video.Type,
     id: String,
+    isLocalFile: Boolean = false,
 ) : ViewModel() {
 
     private val _state = MutableStateFlow<State>(State.LoadingServers)
@@ -33,8 +34,10 @@ class PlayerViewModel(
     private val _playPreviousOrNextEpisode = MutableSharedFlow<Video.Type.Episode>()
     val playPreviousOrNextEpisode: SharedFlow<Video.Type.Episode> = _playPreviousOrNextEpisode
     init {
-        getServers(videoType, id)
-        getSubtitles(videoType)
+        if (!isLocalFile) {
+            getServers(videoType, id)
+            getSubtitles(videoType)
+        }
     }
 
     fun playEpisode(direction: Direction) {
@@ -67,7 +70,9 @@ class PlayerViewModel(
             season = Video.Type.Episode.Season(
                 number = ep.season.number,
                 title = ep.season.title
-            )
+            ),
+            isDownloaded = ep.isDownloaded,
+            localFilePath = ep.localFilePath,
         )
 
         playEpisode(nextEpisode)
@@ -90,8 +95,18 @@ class PlayerViewModel(
         }
     }
     fun playEpisode(episode: Video.Type.Episode) {
-        getServers(episode, episode.id)
-        getSubtitles(episode)
+        if (episode.isDownloaded && !episode.localFilePath.isNullOrEmpty()) {
+            playLocalEpisode(episode)
+        } else {
+            getServers(episode, episode.id)
+            getSubtitles(episode)
+        }
+    }
+
+    private fun playLocalEpisode(episode: Video.Type.Episode) = viewModelScope.launch(Dispatchers.IO) {
+        lastVideoType = episode
+        lastId = episode.id
+        _state.emit(State.SuccessLoadingLocalFile(episode.localFilePath!!))
     }
 
     private fun getServers(videoType: Video.Type, id: String) = viewModelScope.launch(Dispatchers.IO) {
@@ -235,6 +250,7 @@ class PlayerViewModel(
         data class LoadingVideo(val server: Video.Server) : State()
         data class SuccessLoadingVideo(val video: Video, val server: Video.Server) : State()
         data class FailedLoadingVideo(val error: Exception, val server: Video.Server) : State()
+        data class SuccessLoadingLocalFile(val localFilePath: String) : State()
     }
 
     sealed class SubtitleState {

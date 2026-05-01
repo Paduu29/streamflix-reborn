@@ -32,6 +32,8 @@ data class Video(
             val overview: String?,
             val tvShow: TvShow,
             val season: Season,
+            val isDownloaded: Boolean = false,
+            val localFilePath: String? = null,
         ) : Type(), Serializable {
             @Parcelize
             data class TvShow(

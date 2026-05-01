@@ -333,6 +333,21 @@ object UserPreferences {
             Key.QUALITY_HEIGHT.setInt(value)
         }
 
+    enum class DownloadQuality {
+        BEST,
+        HIGH,
+        MEDIUM,
+        LOW,
+    }
+
+    var downloadQuality: DownloadQuality
+        get() = Key.DOWNLOAD_QUALITY.getString()
+            ?.let { value -> DownloadQuality.entries.find { it.name == value } }
+            ?: DownloadQuality.BEST
+        set(value) {
+            Key.DOWNLOAD_QUALITY.setString(value.name)
+        }
+
     var subtitleName: String?
         get() = Key.SUBTITLE_NAME.getString()
         set(value) = Key.SUBTITLE_NAME.setString(value)
@@ -449,6 +464,7 @@ object UserPreferences {
         SCREEN_PADDING_X,
         SCREEN_PADDING_Y,
         QUALITY_HEIGHT,
+        DOWNLOAD_QUALITY,
         SUBTITLE_NAME,
         STREAMINGCOMMUNITY_DOMAIN,
         CUEVANA_DOMAIN,

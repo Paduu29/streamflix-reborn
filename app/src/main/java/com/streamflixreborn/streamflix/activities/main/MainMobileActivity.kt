@@ -315,6 +315,7 @@ class MainMobileActivity : FragmentActivity() {
             R.id.home,
             R.id.movies,
             R.id.tv_shows,
+            R.id.downloads,
             R.id.settings,
         )
     }

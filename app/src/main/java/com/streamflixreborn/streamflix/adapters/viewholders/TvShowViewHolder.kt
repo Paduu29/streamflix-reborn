@@ -3,6 +3,8 @@ package com.streamflixreborn.streamflix.adapters.viewholders
 import android.content.Context
 import android.content.Intent
 import android.os.Bundle
+import android.os.Handler
+import android.os.Looper
 import android.view.LayoutInflater
 import android.view.View
 import android.view.ViewGroup
@@ -61,6 +63,8 @@ import com.streamflixreborn.streamflix.utils.loadTvShowBanner
 import com.streamflixreborn.streamflix.utils.loadTvShowPoster
 import com.streamflixreborn.streamflix.utils.ArtworkRepair
 import com.streamflixreborn.streamflix.providers.Provider
+import com.streamflixreborn.streamflix.utils.DownloadManager
+import com.streamflixreborn.streamflix.models.Download
 import java.util.Locale
 
 class TvShowViewHolder(
@@ -600,7 +604,7 @@ class TvShowViewHolder(
 
                         dao.upsertFavorite(resolvedTvShow, newValue)
 
-                        withContext(Dispatchers.Main) {
+                        Handler(Looper.getMainLooper()).post {
                             tvShow.poster = resolvedTvShow.poster
                             tvShow.banner = resolvedTvShow.banner
                             tvShow.isFavorite = newValue
@@ -734,7 +738,7 @@ class TvShowViewHolder(
 
                         dao.upsertFavorite(resolvedTvShow, newValue)
 
-                        withContext(Dispatchers.Main) {
+                        Handler(Looper.getMainLooper()).post {
                             tvShow.poster = resolvedTvShow.poster
                             tvShow.banner = resolvedTvShow.banner
                             tvShow.isFavorite = newValue

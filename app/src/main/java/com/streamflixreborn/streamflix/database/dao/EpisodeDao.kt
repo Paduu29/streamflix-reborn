@@ -147,4 +147,22 @@ interface EpisodeDao {
     ORDER BY s.number, e.number
 """)
     fun getByTvShowIdAndSeasonNumber(tvShowId: String, seasonNumber: Int): List<Episode>
+
+    @Query("SELECT * FROM episodes WHERE tvShow = :tvShowId AND isDownloaded = 1 ORDER BY season, number")
+    fun getDownloadedEpisodesByTvShowId(tvShowId: String): List<Episode>
+
+    @Query("SELECT * FROM episodes WHERE tvShow = :tvShowId AND season = :seasonId AND isDownloaded = 1 ORDER BY number")
+    fun getDownloadedEpisodesBySeason(tvShowId: String, seasonId: String): List<Episode>
+
+    @Query("SELECT * FROM episodes WHERE id = :id AND isDownloaded = 1")
+    fun getDownloadedEpisodeById(id: String): Episode?
+
+    @Query("UPDATE episodes SET isDownloaded = 1, localFilePath = :localFilePath WHERE id = :id")
+    fun markAsDownloaded(id: String, localFilePath: String)
+
+    @Query("UPDATE episodes SET isDownloaded = 0, localFilePath = NULL WHERE id = :id")
+    fun markAsNotDownloaded(id: String)
+
+    @Query("SELECT COUNT(*) FROM episodes WHERE tvShow = :tvShowId AND isDownloaded = 1")
+    fun getDownloadedEpisodeCount(tvShowId: String): Int
 }

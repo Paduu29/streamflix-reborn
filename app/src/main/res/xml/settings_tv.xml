@@ -92,6 +92,14 @@
             android:key="pc_extra_buffering_settings"
             android:title="@string/player_settings_extra_buffer_title">
 
+            <ListPreference
+                android:key="DOWNLOAD_QUALITY"
+                android:title="@string/settings_download_quality_title"
+                android:summary="@string/settings_download_quality_summary"
+                android:entries="@array/download_quality_entries"
+                android:entryValues="@array/download_quality_values"
+                android:defaultValue="BEST" />
+
             <SwitchPreference
                 android:key="FORCE_EXTRA_BUFFERING"
                 android:title="@string/settings_force_extra_buffer_title"

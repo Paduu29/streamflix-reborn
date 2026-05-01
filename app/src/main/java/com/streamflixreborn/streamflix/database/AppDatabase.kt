@@ -7,10 +7,12 @@ import androidx.room.RoomDatabase
 import androidx.room.TypeConverters
 import androidx.room.migration.Migration
 import androidx.sqlite.db.SupportSQLiteDatabase
+import com.streamflixreborn.streamflix.database.dao.DownloadDao
 import com.streamflixreborn.streamflix.database.dao.EpisodeDao
 import com.streamflixreborn.streamflix.database.dao.MovieDao
 import com.streamflixreborn.streamflix.database.dao.SeasonDao
 import com.streamflixreborn.streamflix.database.dao.TvShowDao
+import com.streamflixreborn.streamflix.models.Download
 import com.streamflixreborn.streamflix.models.Episode
 import com.streamflixreborn.streamflix.models.Movie
 import com.streamflixreborn.streamflix.models.Season
@@ -23,8 +25,9 @@ import com.streamflixreborn.streamflix.utils.UserPreferences
         Movie::class,
         Season::class,
         TvShow::class,
+        Download::class,
     ],
-    version = 8,
+        version = 10,
     exportSchema = false
 )
 @TypeConverters(Converters::class)
@@ -37,6 +40,8 @@ abstract class AppDatabase : RoomDatabase() {
     abstract fun seasonDao(): SeasonDao
 
     abstract fun episodeDao(): EpisodeDao
+
+    abstract fun downloadDao(): DownloadDao
 
     companion object {
 
@@ -104,6 +109,8 @@ abstract class AppDatabase : RoomDatabase() {
                 .addMigrations(MIGRATION_5_6)
                 .addMigrations(MIGRATION_6_7)
                 .addMigrations(MIGRATION_7_8)
+                .addMigrations(MIGRATION_8_9)
+                .addMigrations(MIGRATION_9_10)
                 .build()
         }
 
@@ -180,6 +187,23 @@ abstract class AppDatabase : RoomDatabase() {
             override fun migrate(db: SupportSQLiteDatabase) {
                 // No SQL changes needed as indices were already created in previous migrations 
                 // but are now formally declared in Entity classes, requiring a version bump.
+            }
+        }
+
+        private val MIGRATION_8_9: Migration = object : Migration(8, 9) {
+            override fun migrate(db: SupportSQLiteDatabase) {
+                db.execSQL("CREATE TABLE IF NOT EXISTS `downloads` (`id` TEXT NOT NULL, `contentType` TEXT NOT NULL, `title` TEXT NOT NULL, `subtitle` TEXT, `poster` TEXT, `banner` TEXT, `videoUrl` TEXT NOT NULL, `headers` TEXT, `mimeType` TEXT, `localFilePath` TEXT, `status` TEXT NOT NULL, `progress` INTEGER NOT NULL, `fileSize` INTEGER NOT NULL, `downloadedSize` INTEGER NOT NULL, `errorMessage` TEXT, `createdAt` INTEGER NOT NULL, `completedAt` INTEGER, `tvShowId` TEXT, `tvShowTitle` TEXT, `seasonNumber` INTEGER, `episodeNumber` INTEGER, `quality` TEXT, PRIMARY KEY(`id`))")
+                db.execSQL("CREATE INDEX IF NOT EXISTS `index_downloads_status` ON `downloads` (`status`)")
+                db.execSQL("CREATE INDEX IF NOT EXISTS `index_downloads_contentType` ON `downloads` (`contentType`)")
+                db.execSQL("CREATE INDEX IF NOT EXISTS `index_downloads_tvShowId` ON `downloads` (`tvShowId`)")
+            }
+        }
+
+        private val MIGRATION_9_10: Migration = object : Migration(9, 10) {
+            override fun migrate(db: SupportSQLiteDatabase) {
+                db.execSQL("ALTER TABLE episodes ADD COLUMN isDownloaded INTEGER NOT NULL DEFAULT 0")
+                db.execSQL("ALTER TABLE episodes ADD COLUMN localFilePath TEXT")
+                db.execSQL("CREATE INDEX IF NOT EXISTS `index_episodes_tvShow_isDownloaded` ON `episodes` (`tvShow`, `isDownloaded`)")
             }
         }
     }

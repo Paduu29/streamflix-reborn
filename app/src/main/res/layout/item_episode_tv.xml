@@ -2,10 +2,12 @@
 <androidx.constraintlayout.widget.ConstraintLayout xmlns:android="http://schemas.android.com/apk/res/android"
     xmlns:app="http://schemas.android.com/apk/res-auto"
     xmlns:tools="http://schemas.android.com/tools"
+    android:id="@+id/episodeRoot"
     android:layout_width="wrap_content"
     android:layout_height="wrap_content"
     android:focusable="true"
-    android:focusableInTouchMode="true">
+    android:focusableInTouchMode="true"
+    android:nextFocusDown="@id/actionButtonGroup">
 
     <ImageView
         android:id="@+id/iv_episode_poster"
@@ -15,6 +17,8 @@
         android:duplicateParentState="true"
         android:foreground="@drawable/fg_item_episode_image_tv"
         android:scaleType="centerCrop"
+        android:nextFocusDown="@id/actionButtonGroup"
+        android:nextFocusUp="@id/episodeRoot"
         app:layout_constraintDimensionRatio="2:1"
         app:layout_constraintEnd_toEndOf="parent"
         app:layout_constraintStart_toStartOf="parent"
@@ -89,5 +93,65 @@
         app:layout_constraintStart_toStartOf="parent"
         app:layout_constraintEnd_toEndOf="parent"
         tools:text="Overview" />
+
+    <FrameLayout
+        android:id="@+id/actionButtonGroup"
+        android:layout_width="48dp"
+        android:layout_height="48dp"
+        android:layout_marginEnd="16dp"
+        android:layout_marginBottom="12dp"
+        android:focusable="true"
+        android:focusableInTouchMode="true"
+        android:nextFocusLeft="@id/episodeRoot"
+        android:nextFocusUp="@id/episodeRoot"
+        app:layout_constraintBottom_toBottomOf="parent"
+        app:layout_constraintEnd_toEndOf="parent">
+
+        <ImageView
+            android:id="@+id/btn_episode_download"
+            android:layout_width="match_parent"
+            android:layout_height="match_parent"
+            android:padding="8dp"
+            android:background="@drawable/bg_episode_action_button_tv"
+            android:src="@drawable/ic_menu_downloads"
+            android:contentDescription="@string/download_start"
+            android:duplicateParentState="true"
+            android:visibility="gone"
+            app:tint="#FFFFFF" />
+
+        <ProgressBar
+            android:id="@+id/pb_episode_download_progress"
+            android:layout_width="match_parent"
+            android:layout_height="match_parent"
+            android:indeterminate="true"
+            android:duplicateParentState="true"
+            android:visibility="gone"
+            app:tint="#FFFFFF" />
+
+        <ImageView
+            android:id="@+id/btn_episode_cancel_download"
+            android:layout_width="match_parent"
+            android:layout_height="match_parent"
+            android:padding="8dp"
+            android:background="@drawable/bg_episode_action_button_tv"
+            android:src="@android:drawable/ic_menu_close_clear_cancel"
+            android:contentDescription="@string/download_cancel"
+            android:duplicateParentState="true"
+            android:visibility="gone"
+            app:tint="#FF5555" />
+
+        <ImageView
+            android:id="@+id/btn_episode_play_download"
+            android:layout_width="match_parent"
+            android:layout_height="match_parent"
+            android:padding="8dp"
+            android:background="@drawable/bg_episode_action_button_tv"
+            android:src="@drawable/ic_play"
+            android:contentDescription="@string/download_play"
+            android:duplicateParentState="true"
+            android:visibility="gone"
+            app:tint="#FFFFFF" />
+
+    </FrameLayout>
 
 </androidx.constraintlayout.widget.ConstraintLayout>

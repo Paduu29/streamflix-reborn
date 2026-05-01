@@ -16,6 +16,7 @@ import java.util.Calendar
         Index(value = ["tvShow", "isWatched"]),
         Index(value = ["tvShow", "lastEngagementTimeUtcMillis"]),
         Index(value = ["season", "number"]),
+        Index(value = ["tvShow", "isDownloaded"]),
     ]
 )
 class Episode(
@@ -29,6 +30,9 @@ class Episode(
 
     var tvShow: TvShow? = null,
     var season: Season? = null,
+
+    var isDownloaded: Boolean = false,
+    var localFilePath: String? = null,
 ) : WatchItem, AppAdapter.Item {
 
     var released = released?.toCalendar()
@@ -42,6 +46,8 @@ class Episode(
         if (isWatched != episode.isWatched) return false
         if (watchedDate != episode.watchedDate) return false
         if (watchHistory != episode.watchHistory) return false
+        if (isDownloaded != episode.isDownloaded) return false
+        if (localFilePath != episode.localFilePath) return false
         return true
     }
 
@@ -49,6 +55,8 @@ class Episode(
         this.isWatched = episode.isWatched
         this.watchedDate = episode.watchedDate
         this.watchHistory = episode.watchHistory
+        this.isDownloaded = episode.isDownloaded
+        this.localFilePath = episode.localFilePath
         return this
     }
 
@@ -65,6 +73,8 @@ class Episode(
         poster: String? = this.poster,
         tvShow: TvShow? = this.tvShow,
         season: Season? = this.season,
+        isDownloaded: Boolean = this.isDownloaded,
+        localFilePath: String? = this.localFilePath,
     ) = Episode(
         id,
         number,
@@ -74,6 +84,8 @@ class Episode(
         overview,
         tvShow,
         season,
+        isDownloaded,
+        localFilePath,
     )
 
     override fun equals(other: Any?): Boolean {
@@ -93,6 +105,8 @@ class Episode(
         if (isWatched != other.isWatched) return false
         if (watchedDate != other.watchedDate) return false
         if (watchHistory != other.watchHistory) return false
+        if (isDownloaded != other.isDownloaded) return false
+        if (localFilePath != other.localFilePath) return false
         if (!::itemType.isInitialized || !other::itemType.isInitialized) return false
         return itemType == other.itemType
     }
@@ -109,6 +123,8 @@ class Episode(
         result = 31 * result + isWatched.hashCode()
         result = 31 * result + (watchedDate?.hashCode() ?: 0)
         result = 31 * result + (watchHistory?.hashCode() ?: 0)
+        result = 31 * result + isDownloaded.hashCode()
+        result = 31 * result + (localFilePath?.hashCode() ?: 0)
         result = 31 * result + (if (::itemType.isInitialized) itemType.hashCode() else 0)
         return result
     }

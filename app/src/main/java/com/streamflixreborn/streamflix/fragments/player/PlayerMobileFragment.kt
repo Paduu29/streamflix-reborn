@@ -116,7 +116,7 @@ class PlayerMobileFragment : Fragment() {
 
     private val args by navArgs<PlayerMobileFragmentArgs>()
     private val database by lazy { AppDatabase.getInstance(requireContext()) }
-    private val viewModel by viewModelsFactory { PlayerViewModel(args.videoType, args.id) }
+    private val viewModel by viewModelsFactory { PlayerViewModel(args.videoType, args.id, args.isLocalFile) }
 
     private lateinit var player: ExoPlayer
     private lateinit var httpDataSource: HttpDataSource.Factory
@@ -267,7 +267,14 @@ class PlayerMobileFragment : Fragment() {
     override fun onViewCreated(view: View, savedInstanceState: Bundle?) {
         super.onViewCreated(view, savedInstanceState)
         initializePlayer(false)
-        initializeVideo()
+
+        if (args.isLocalFile && args.localFilePath != null) {
+            setupLocalFilePlayback()
+            playLocalFile(args.localFilePath!!)
+        } else {
+            initializeVideo()
+        }
+
         gestureHelper = PlayerGestureHelper(
             requireContext(), 
             binding.pvPlayer, 
@@ -368,6 +375,10 @@ class PlayerMobileFragment : Fragment() {
                         PlayerSettingsView.Settings.ExtraBuffering.init(state.video.extraBuffering)
                         PlayerSettingsView.Settings.SoftwareDecoder.init(false)
                         displayVideo(state.video, state.server)
+                    }
+
+                    is PlayerViewModel.State.SuccessLoadingLocalFile -> {
+                        playLocalFile(state.localFilePath)
                     }
 
                     is PlayerViewModel.State.FailedLoadingVideo -> {
@@ -500,7 +511,9 @@ class PlayerMobileFragment : Fragment() {
                             id = nextEpisode.id,
                             videoType = nextEpisode,
                             title = nextEpisode.tvShow.title,
-                            subtitle = "S${nextEpisode.season.number} E${nextEpisode.number}  •  ${nextEpisode.title}"
+                            subtitle = "S${nextEpisode.season.number} E${nextEpisode.number}  •  ${nextEpisode.title}",
+                            isLocalFile = nextEpisode.isDownloaded,
+                            localFilePath = nextEpisode.localFilePath,
                         )
 
                     hideNextEpisodeOverlay()
@@ -745,7 +758,7 @@ class PlayerMobileFragment : Fragment() {
         }
     }
 
- private fun updatePlayerScale() {
+    private fun updatePlayerScale() {
         val videoSurfaceView = binding.pvPlayer.videoSurfaceView
         val playerResize = UserPreferences.playerResize 
 
@@ -770,6 +783,114 @@ class PlayerMobileFragment : Fragment() {
                 videoSurfaceView?.scaleY = 1f
             }
         }
+    }
+
+    private fun setupLocalFilePlayback() {
+        WindowCompat.getInsetsController(
+            requireActivity().window,
+            requireActivity().window.decorView
+        ).run {
+            systemBarsBehavior = WindowInsetsControllerCompat.BEHAVIOR_SHOW_TRANSIENT_BARS_BY_SWIPE
+            hide(WindowInsetsCompat.Type.systemBars())
+        }
+        requireActivity().requestedOrientation = ActivityInfo.SCREEN_ORIENTATION_SENSOR_LANDSCAPE
+    }
+
+    private fun setupLocalFileEpisodeNavigation(type: Video.Type.Episode) {
+        nextEpisodeOverlayDismissed = false
+        nextEpisodePrefetchTargetId = null
+
+        if (EpisodeManager.listIsEmpty(type)) {
+            EpisodeManager.clearEpisodes()
+            lifecycleScope.launch(Dispatchers.IO) {
+                EpisodeManager.addEpisodesFromDb(type, database)
+                withContext(Dispatchers.Main) {
+                    EpisodeManager.setCurrentEpisode(type)
+                    setupEpisodeNavigationButtons()
+                }
+            }
+        } else {
+            EpisodeManager.setCurrentEpisode(type)
+            setupEpisodeNavigationButtons()
+        }
+    }
+
+    private fun playLocalFile(localFilePath: String) {
+        val file = java.io.File(localFilePath)
+        if (!file.exists()) {
+            Toast.makeText(requireContext(), "File not found: $localFilePath", Toast.LENGTH_LONG).show()
+            findNavController().navigateUp()
+            return
+        }
+
+        val videoType = args.videoType
+        if (videoType is Video.Type.Episode) {
+            setupLocalFileEpisodeNavigation(videoType)
+        }
+
+        updatePlayerHeader()
+
+        binding.pvPlayer.controller.binding.btnExoBack.setOnClickListener {
+            findNavController().navigateUp()
+        }
+
+        binding.pvPlayer.controller.binding.exoReplay.setOnClickListener {
+            player.seekTo(0)
+        }
+
+        binding.pvPlayer.controller.binding.btnExoLock.setOnClickListener {
+            binding.pvPlayer.controller.binding.gControlsLock.isGone = true
+            binding.pvPlayer.controller.binding.btnExoUnlock.isVisible = true
+        }
+
+        binding.pvPlayer.controller.binding.btnExoUnlock.setOnClickListener {
+            binding.pvPlayer.controller.binding.gControlsLock.isVisible = true
+            binding.pvPlayer.controller.binding.btnExoUnlock.isGone = true
+        }
+
+        binding.pvPlayer.controller.binding.btnExoPictureInPicture.setOnClickListener {
+            if (Build.VERSION.SDK_INT < Build.VERSION_CODES.O) {
+                Toast.makeText(
+                    requireContext(),
+                    getString(R.string.player_picture_in_picture_not_supported),
+                    Toast.LENGTH_SHORT
+                ).show()
+            } else {
+                enterPIPMode()
+            }
+        }
+
+        binding.pvPlayer.controller.binding.btnExoAspectRatio.setOnClickListener {
+            val newResize = UserPreferences.playerResize.next()
+            zoomToast?.cancel()
+            zoomToast = Toast.makeText(requireContext(), newResize.stringRes, Toast.LENGTH_SHORT)
+            zoomToast?.show()
+
+            UserPreferences.playerResize = newResize
+            binding.pvPlayer.controllerShowTimeoutMs = binding.pvPlayer.controllerShowTimeoutMs
+            updatePlayerScale()
+        }
+
+        binding.pvPlayer.controller.binding.exoSettings.setOnClickListener {
+            binding.pvPlayer.controllerShowTimeoutMs = binding.pvPlayer.controllerShowTimeoutMs
+            binding.settings.show()
+        }
+
+        val uri = localFilePath.toUri()
+        player.setMediaItem(
+            MediaItem.Builder()
+                .setUri(uri)
+                .build()
+        )
+        player.prepare()
+        player.play()
+
+        player.addListener(object : Player.Listener {
+            override fun onIsPlayingChanged(isPlaying: Boolean) {
+                super.onIsPlayingChanged(isPlaying)
+                binding.pvPlayer.keepScreenOn = isPlaying || UserPreferences.keepScreenOnWhenPaused
+            }
+        })
     }
 
     fun setupEpisodeNavigationButtons() {

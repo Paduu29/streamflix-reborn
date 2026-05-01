@@ -772,6 +772,17 @@ class SettingsTvFragment : LeanbackPreferenceFragmentCompat() {
             }
         }
 
+        findPreference<ListPreference>("DOWNLOAD_QUALITY")?.apply {
+            value = UserPreferences.downloadQuality.name
+            summaryProvider = Preference.SummaryProvider<ListPreference> { pref ->
+                pref.entries.getOrNull(pref.findIndexOfValue(pref.value)) ?: ""
+            }
+            setOnPreferenceChangeListener { _, newValue ->
+                UserPreferences.downloadQuality = UserPreferences.DownloadQuality.valueOf(newValue as String)
+                true
+            }
+        }
+
         findPreference<Preference>("key_backup_refresh_cache_tv")?.setOnPreferenceClickListener {
             AlertDialog.Builder(requireContext())
                 .setTitle(R.string.settings_refresh_cache_confirm)

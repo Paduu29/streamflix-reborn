@@ -38,6 +38,20 @@
         <item>smarttube_beta</item>
     </string-array>
 
+    <string-array name="download_quality_entries">
+        <item>@string/settings_download_quality_best</item>
+        <item>@string/settings_download_quality_high</item>
+        <item>@string/settings_download_quality_medium</item>
+        <item>@string/settings_download_quality_low</item>
+    </string-array>
+
+    <string-array name="download_quality_values">
+        <item>BEST</item>
+        <item>HIGH</item>
+        <item>MEDIUM</item>
+        <item>LOW</item>
+    </string-array>
+
     <string-array name="parental_control_age_entries">
         <item>@string/settings_parental_max_age_disabled</item>
         <item>0+</item>

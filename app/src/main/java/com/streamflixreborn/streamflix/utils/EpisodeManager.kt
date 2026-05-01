@@ -67,6 +67,11 @@ object EpisodeManager {
                         fetchedEpisodes.forEach { episode ->
                             episode.tvShow = episode.tvShow ?: tvShow
                             episode.season = episode.season ?: season
+                            val dbEpisode = database.episodeDao().getById(episode.id)
+                            if (dbEpisode != null && dbEpisode.isDownloaded) {
+                                episode.isDownloaded = true
+                                episode.localFilePath = dbEpisode.localFilePath
+                            }
                         }
                         database.episodeDao().insertAll(fetchedEpisodes)
                         episodesFromDb = fetchedEpisodes
@@ -81,6 +86,11 @@ object EpisodeManager {
             episodesFromDb.forEach { episode ->
                 episode.tvShow = episode.tvShow ?: tvShowContext
                 episode.season = episode.season ?: seasonContext
+                val dbEpisode = database.episodeDao().getById(episode.id)
+                if (dbEpisode != null && dbEpisode.isDownloaded) {
+                    episode.isDownloaded = true
+                    episode.localFilePath = dbEpisode.localFilePath
+                }
             }
             addEpisodes(convertToVideoTypeEpisodes(episodesFromDb, database, seasonNumber))
         }
@@ -140,6 +150,11 @@ object EpisodeManager {
         nextSeasonEpisodes.forEach { episode ->
             episode.tvShow = episode.tvShow ?: seasonToLoad.tvShow
             episode.season = episode.season ?: seasonToLoad
+            val dbEpisode = database.episodeDao().getById(episode.id)
+            if (dbEpisode != null && dbEpisode.isDownloaded) {
+                episode.isDownloaded = true
+                episode.localFilePath = dbEpisode.localFilePath
+            }
         }
 
         mergeEpisodes(convertToVideoTypeEpisodes(nextSeasonEpisodes, database, seasonToLoad.number))
@@ -214,7 +229,9 @@ object EpisodeManager {
                 season = Episode.Season(
                     number = seasonFromDb?.number ?: seasonNumber,
                     title = seasonFromDb?.title ?: ep.season?.title
-                )
+                ),
+                isDownloaded = ep.isDownloaded,
+                localFilePath = ep.localFilePath,
             )
         }
         return videoEpisodes

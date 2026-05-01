@@ -6,6 +6,8 @@ import android.content.Intent
 import android.content.SharedPreferences
 import android.content.pm.PackageManager
 import android.os.Bundle
+import android.os.Handler
+import android.os.Looper
 import android.util.Log
 import android.view.View
 import android.view.ViewGroup
@@ -80,8 +82,10 @@ import com.streamflixreborn.streamflix.utils.loadMoviePoster
 import com.streamflixreborn.streamflix.utils.ArtworkRepair
 import com.streamflixreborn.streamflix.utils.toActivity
 import java.util.Locale
-import com.streamflixreborn.streamflix.utils.UserPreferences
+import com.streamflixreborn.streamflix.utils.DownloadManager
+import com.streamflixreborn.streamflix.models.Download
 import com.streamflixreborn.streamflix.providers.Provider
+import com.streamflixreborn.streamflix.utils.UserPreferences
 import android.view.KeyEvent
 import com.streamflixreborn.streamflix.databinding.ContentMovieDirectorsMobileBinding
 import com.streamflixreborn.streamflix.databinding.ContentMovieDirectorsTvBinding
@@ -738,7 +742,7 @@ class MovieViewHolder(
 
                         dao.upsertFavorite(resolvedMovie, newValue)
 
-                        withContext(Dispatchers.Main) {
+                        Handler(Looper.getMainLooper()).post {
                             movie.poster = resolvedMovie.poster
                             movie.banner = resolvedMovie.banner
                             movie.isFavorite = newValue
@@ -753,6 +757,104 @@ class MovieViewHolder(
             setImageDrawable(
                 ContextCompat.getDrawable(context, movie.isFavorite.drawable())
             )
+        }
+
+        binding.btnMovieDownload.apply {
+            visibility = View.VISIBLE
+            setOnClickListener {
+                checkProviderAndRun {
+                    val provider = UserPreferences.currentProvider
+                    if (provider == null) {
+                        Toast.makeText(context, "No provider selected", Toast.LENGTH_SHORT).show()
+                        return@checkProviderAndRun
+                    }
+                    val downloadManager = DownloadManager.getInstance(context)
+                    val downloadId = "movie_${movie.id}"
+
+                    itemView.findViewTreeLifecycleOwner()?.lifecycleScope?.launch(Dispatchers.IO) {
+                        try {
+                            val existingDownload = database.downloadDao().getDownloadById(downloadId)
+                            if (existingDownload?.status == Download.DownloadStatus.COMPLETED) {
+                                Handler(Looper.getMainLooper()).post {
+                                    Toast.makeText(context, context.getString(R.string.download_already_completed), Toast.LENGTH_SHORT).show()
+                                }
+                                return@launch
+                            }
+                            if (existingDownload?.status == Download.DownloadStatus.DOWNLOADING || existingDownload?.status == Download.DownloadStatus.QUEUED) {
+                                Handler(Looper.getMainLooper()).post {
+                                    Toast.makeText(context, context.getString(R.string.download_already_in_progress), Toast.LENGTH_SHORT).show()
+                                }
+                                return@launch
+                            }
+
+                            Handler(Looper.getMainLooper()).post {
+                                Toast.makeText(context, context.getString(R.string.download_resolving_url, movie.title), Toast.LENGTH_SHORT).show()
+                            }
+
+                            val videoType = Video.Type.Movie(
+                                id = movie.id,
+                                title = movie.title,
+                                releaseDate = movie.released?.format("yyyy-MM-dd") ?: "",
+                                poster = movie.poster ?: movie.banner ?: "",
+                                imdbId = movie.imdbId,
+                            )
+                            val servers = provider.getServers(movie.id, videoType)
+                            if (servers.isEmpty()) {
+                                Handler(Looper.getMainLooper()).post {
+                                    Toast.makeText(context, context.getString(R.string.download_no_servers), Toast.LENGTH_SHORT).show()
+                                }
+                                return@launch
+                            }
+
+                            val video = provider.getVideo(servers.first())
+                            val outputDir = downloadManager.getMovieDir(movie.id)
+                            val downloadEntry = Download(
+                                id = downloadId,
+                                contentType = Download.ContentType.MOVIE,
+                                title = movie.title,
+                                poster = movie.poster,
+                                banner = movie.banner,
+                                videoUrl = video.source,
+                                headers = video.headers ?: emptyMap(),
+                                mimeType = video.type,
+                                status = Download.DownloadStatus.DOWNLOADING,
+                            )
+                            database.downloadDao().insert(downloadEntry)
+
+                            Handler(Looper.getMainLooper()).post {
+                                Toast.makeText(context, context.getString(R.string.download_starting, movie.title), Toast.LENGTH_LONG).show()
+                            }
+
+                            downloadManager.downloadVideo(
+                                downloadId = downloadId,
+                                url = video.source,
+                                headers = video.headers ?: emptyMap(),
+                                outputDir = outputDir,
+                                onProgress = { downloaded, total ->
+                                    val progress = if (total > 0) ((downloaded.toFloat() / total) * 100).toInt() else 0
+                                    database.downloadDao().updateProgress(downloadId, Download.DownloadStatus.DOWNLOADING, progress, downloaded)
+                                },
+                                onComplete = { file ->
+                                    database.downloadDao().markAsCompleted(downloadId, Download.DownloadStatus.COMPLETED, file.absolutePath, System.currentTimeMillis())
+                                    Handler(Looper.getMainLooper()).post {
+                                        Toast.makeText(context, context.getString(R.string.download_completed, movie.title), Toast.LENGTH_SHORT).show()
+                                    }
+                                },
+                                onError = { error ->
+                                    database.downloadDao().markAsFailed(downloadId, Download.DownloadStatus.FAILED, error.message)
+                                    Handler(Looper.getMainLooper()).post {
+                                        Toast.makeText(context, context.getString(R.string.download_failed, movie.title, error.message), Toast.LENGTH_LONG).show()
+                                    }
+                                },
+                            )
+                        } catch (e: Exception) {
+                            Handler(Looper.getMainLooper()).post {
+                                Toast.makeText(context, context.getString(R.string.download_failed, movie.title, e.message), Toast.LENGTH_LONG).show()
+                            }
+                        }
+                    }
+                }
+            }
         }
     }
 
@@ -867,7 +969,7 @@ class MovieViewHolder(
 
                         dao.upsertFavorite(resolvedMovie, newValue)
 
-                        withContext(Dispatchers.Main) {
+                        Handler(Looper.getMainLooper()).post {
                             movie.poster = resolvedMovie.poster
                             movie.banner = resolvedMovie.banner
                             movie.isFavorite = newValue
@@ -882,6 +984,104 @@ class MovieViewHolder(
             setImageDrawable(
                 ContextCompat.getDrawable(context, movie.isFavorite.drawable())
             )
+        }
+
+        binding.btnMovieDownload.apply {
+            visibility = View.VISIBLE
+            setOnClickListener {
+                checkProviderAndRun {
+                    val provider = UserPreferences.currentProvider
+                    if (provider == null) {
+                        Toast.makeText(context, "No provider selected", Toast.LENGTH_SHORT).show()
+                        return@checkProviderAndRun
+                    }
+                    val downloadManager = DownloadManager.getInstance(context)
+                    val downloadId = "movie_${movie.id}"
+
+                    itemView.findViewTreeLifecycleOwner()?.lifecycleScope?.launch(Dispatchers.IO) {
+                        try {
+                            val existingDownload = database.downloadDao().getDownloadById(downloadId)
+                            if (existingDownload?.status == Download.DownloadStatus.COMPLETED) {
+                                Handler(Looper.getMainLooper()).post {
+                                    Toast.makeText(context, context.getString(R.string.download_already_completed), Toast.LENGTH_SHORT).show()
+                                }
+                                return@launch
+                            }
+                            if (existingDownload?.status == Download.DownloadStatus.DOWNLOADING || existingDownload?.status == Download.DownloadStatus.QUEUED) {
+                                Handler(Looper.getMainLooper()).post {
+                                    Toast.makeText(context, context.getString(R.string.download_already_in_progress), Toast.LENGTH_SHORT).show()
+                                }
+                                return@launch
+                            }
+
+                            Handler(Looper.getMainLooper()).post {
+                                Toast.makeText(context, context.getString(R.string.download_resolving_url, movie.title), Toast.LENGTH_SHORT).show()
+                            }
+
+                            val videoType = Video.Type.Movie(
+                                id = movie.id,
+                                title = movie.title,
+                                releaseDate = movie.released?.format("yyyy-MM-dd") ?: "",
+                                poster = movie.poster ?: movie.banner ?: "",
+                                imdbId = movie.imdbId,
+                            )
+                            val servers = provider.getServers(movie.id, videoType)
+                            if (servers.isEmpty()) {
+                                Handler(Looper.getMainLooper()).post {
+                                    Toast.makeText(context, context.getString(R.string.download_no_servers), Toast.LENGTH_SHORT).show()
+                                }
+                                return@launch
+                            }
+
+                            val video = provider.getVideo(servers.first())
+                            val outputDir = downloadManager.getMovieDir(movie.id)
+                            val downloadEntry = Download(
+                                id = downloadId,
+                                contentType = Download.ContentType.MOVIE,
+                                title = movie.title,
+                                poster = movie.poster,
+                                banner = movie.banner,
+                                videoUrl = video.source,
+                                headers = video.headers ?: emptyMap(),
+                                mimeType = video.type,
+                                status = Download.DownloadStatus.DOWNLOADING,
+                            )
+                            database.downloadDao().insert(downloadEntry)
+
+                            Handler(Looper.getMainLooper()).post {
+                                Toast.makeText(context, context.getString(R.string.download_starting, movie.title), Toast.LENGTH_LONG).show()
+                            }
+
+                            downloadManager.downloadVideo(
+                                downloadId = downloadId,
+                                url = video.source,
+                                headers = video.headers ?: emptyMap(),
+                                outputDir = outputDir,
+                                onProgress = { downloaded, total ->
+                                    val progress = if (total > 0) ((downloaded.toFloat() / total) * 100).toInt() else 0
+                                    database.downloadDao().updateProgress(downloadId, Download.DownloadStatus.DOWNLOADING, progress, downloaded)
+                                },
+                                onComplete = { file ->
+                                    database.downloadDao().markAsCompleted(downloadId, Download.DownloadStatus.COMPLETED, file.absolutePath, System.currentTimeMillis())
+                                    Handler(Looper.getMainLooper()).post {
+                                        Toast.makeText(context, context.getString(R.string.download_completed, movie.title), Toast.LENGTH_SHORT).show()
+                                    }
+                                },
+                                onError = { error ->
+                                    database.downloadDao().markAsFailed(downloadId, Download.DownloadStatus.FAILED, error.message)
+                                    Handler(Looper.getMainLooper()).post {
+                                        Toast.makeText(context, context.getString(R.string.download_failed, movie.title, error.message), Toast.LENGTH_LONG).show()
+                                    }
+                                },
+                            )
+                        } catch (e: Exception) {
+                            Handler(Looper.getMainLooper()).post {
+                                Toast.makeText(context, context.getString(R.string.download_failed, movie.title, e.message), Toast.LENGTH_LONG).show()
+                            }
+                        }
+                    }
+                }
+            }
         }
     }
 

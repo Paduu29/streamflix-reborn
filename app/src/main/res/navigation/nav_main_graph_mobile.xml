@@ -217,6 +217,15 @@
         <argument
             android:name="videoType"
             app:argType="com.streamflixreborn.streamflix.models.Video$Type" />
+        <argument
+            android:name="isLocalFile"
+            app:argType="boolean"
+            android:defaultValue="false" />
+        <argument
+            android:name="localFilePath"
+            app:argType="string"
+            app:nullable="true"
+            android:defaultValue="@null" />
         <action
             android:id="@+id/action_playerMobileFragment_self"
             app:destination="@id/player"
@@ -235,4 +244,19 @@
         android:id="@+id/settings_about"
         android:name="com.streamflixreborn.streamflix.fragments.settings.about.SettingsAboutMobileFragment"
         android:label="fragment_settings_about_mobile" />
+    <fragment
+        android:id="@+id/downloads"
+        android:name="com.streamflixreborn.streamflix.fragments.downloads.DownloadsMobileFragment"
+        android:label="fragment_downloads_mobile"
+        tools:layout="@layout/fragment_downloads_mobile">
+        <action
+            android:id="@+id/action_downloads_to_player"
+            app:destination="@id/player" />
+        <action
+            android:id="@+id/action_downloads_to_movie"
+            app:destination="@id/movie" />
+        <action
+            android:id="@+id/action_downloads_to_tv_show"
+            app:destination="@id/tv_show" />
+    </fragment>
 </navigation>

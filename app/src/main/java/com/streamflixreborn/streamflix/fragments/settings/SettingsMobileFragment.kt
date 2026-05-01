@@ -658,6 +658,21 @@ class SettingsMobileFragment : PreferenceFragmentCompat() {
             }
         }
 
+        findPreference<ListPreference>("DOWNLOAD_QUALITY")?.apply {
+            value = UserPreferences.downloadQuality.name
+            summaryProvider = Preference.SummaryProvider<ListPreference> { pref ->
+                pref.entries.getOrNull(pref.findIndexOfValue(pref.value)) ?: ""
+            }
+            setOnPreferenceChangeListener { preference, newValue ->
+                val quality = UserPreferences.DownloadQuality.valueOf(newValue as String)
+                UserPreferences.downloadQuality = quality
+                if (preference is ListPreference) {
+                    preference.value = quality.name
+                }
+                true
+            }
+        }
+
         findPreference<SwitchPreference>("IMMERSIVE_MODE")?.apply {
             isChecked = UserPreferences.immersiveMode
             setOnPreferenceChangeListener { _, newValue ->
