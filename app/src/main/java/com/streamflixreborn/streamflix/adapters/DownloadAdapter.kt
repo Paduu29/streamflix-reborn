@@ -8,6 +8,7 @@ import android.widget.ImageButton
 import android.widget.ImageView
 import android.widget.ProgressBar
 import android.widget.TextView
+import androidx.recyclerview.widget.DiffUtil
 import androidx.recyclerview.widget.RecyclerView
 import androidx.viewbinding.ViewBinding
 import com.bumptech.glide.Glide
@@ -53,7 +54,7 @@ class DownloadsAdapter(
 
     private val items = mutableListOf<DownloadItem>()
     var progressMap: Map<String, DownloadProgress> = emptyMap()
-    
+
     private val activeHolders = mutableMapOf<String, ItemViewHolder>()
 
     data class DownloadProgress(
@@ -63,10 +64,16 @@ class DownloadsAdapter(
         val etaSeconds: Long = -1
     )
 
+    init {
+        setHasStableIds(true)
+    }
+
     fun submitList(newItems: List<DownloadItem>) {
+        val oldItems = items.toList()
+        val diffResult = DiffUtil.calculateDiff(DownloadDiffCallback(oldItems, newItems))
         items.clear()
         items.addAll(newItems)
-        notifyDataSetChanged()
+        diffResult.dispatchUpdatesTo(this)
     }
 
     fun getCurrentList(): List<DownloadItem> = items.toList()
@@ -74,6 +81,19 @@ class DownloadsAdapter(
     fun indexOfDownload(downloadId: String): Int {
         return items.indexOfFirst {
             it is DownloadItem.Download && it.download.id == downloadId
+        }
+    }
+
+    override fun getItemId(position: Int): Long {
+        return when (val item = items.getOrNull(position)) {
+            is DownloadItem.Download -> item.download.id.hashCode().toLong()
+            is DownloadItem.Header -> listOf(
+                "header",
+                item.tvShowId,
+                item.tvShowTitle,
+                item.seasonNumber.toString(),
+            ).joinToString(":").hashCode().toLong()
+            null -> RecyclerView.NO_ID
         }
     }
 
@@ -109,8 +129,9 @@ class DownloadsAdapter(
         position: Int,
         payloads: MutableList<Any>
     ) {
-        if (holder is ItemViewHolder && payloads.isNotEmpty()) {
-            holder.updateProgress((items[position] as DownloadItem.Download).download)
+        val item = items.getOrNull(position)
+        if (holder is ItemViewHolder && payloads.isNotEmpty() && item is DownloadItem.Download) {
+            holder.updateDownloadState(item.download)
         } else {
             onBindViewHolder(holder, position)
         }
@@ -121,16 +142,14 @@ class DownloadsAdapter(
     override fun onViewAttachedToWindow(holder: RecyclerView.ViewHolder) {
         super.onViewAttachedToWindow(holder)
         if (holder is ItemViewHolder) {
-            val download = items.getOrNull(holder.bindingAdapterPosition) as? DownloadItem.Download
-            download?.let { activeHolders[it.download.id] = holder }
+            holder.boundDownloadId?.let { activeHolders[it] = holder }
         }
     }
 
     override fun onViewDetachedFromWindow(holder: RecyclerView.ViewHolder) {
         super.onViewDetachedFromWindow(holder)
         if (holder is ItemViewHolder) {
-            val download = items.getOrNull(holder.bindingAdapterPosition) as? DownloadItem.Download
-            download?.let { activeHolders.remove(it.download.id) }
+            holder.boundDownloadId?.let { activeHolders.remove(it) }
         }
     }
 
@@ -169,6 +188,8 @@ class DownloadsAdapter(
         private val btnAction: ImageButton = binding.root.findViewById(R.id.btnAction)
         private val btnDelete: ImageButton = binding.root.findViewById(R.id.btnDelete)
         private val root: View = binding.root.findViewById(R.id.downloadItemRoot)
+        var boundDownloadId: String? = null
+            private set
 
         private fun setupInnerControlKeyListener(view: View) {
             view.setOnKeyListener { _, keyCode, event ->
@@ -182,6 +203,11 @@ class DownloadsAdapter(
         }
 
         fun bind(download: Download) {
+            if (boundDownloadId != null && boundDownloadId != download.id) {
+                activeHolders.remove(boundDownloadId)
+            }
+            boundDownloadId = download.id
+            activeHolders[download.id] = this
             tvTitle.text = download.title
 
             val subtitle = when {
@@ -219,76 +245,7 @@ class DownloadsAdapter(
                 ivPoster.setImageResource(R.drawable.glide_fallback_cover)
             }
 
-            val progressInfo = progressMap[download.id]
-            
-            when (download.status) {
-                Download.DownloadStatus.DOWNLOADING,
-                Download.DownloadStatus.QUEUED,
-                Download.DownloadStatus.PAUSED -> {
-                    progressBar.visibility = View.VISIBLE
-                    tvProgressPercent.visibility = View.VISIBLE
-                    progressBar.progress = progressInfo?.progress ?: download.progress
-                    tvProgressPercent.text = "${progressBar.progress}%"
-                    btnAction.visibility = View.GONE
-                    tvStatus.text = progressInfo?.status.orEmpty()
-                    tvStatus.visibility = if (tvStatus.text.isEmpty()) View.GONE else View.VISIBLE
-                }
-
-                Download.DownloadStatus.COMPLETED -> {
-                    progressBar.visibility = View.GONE
-                    tvProgressPercent.visibility = View.GONE
-                    btnAction.visibility = View.VISIBLE
-                    
-                    val actualItemId = when (download.contentType) {
-                        Download.ContentType.MOVIE -> download.id.removePrefix("movie_")
-                        Download.ContentType.EPISODE -> download.id.removePrefix("episode_")
-                        else -> download.id
-                    }
-                    
-                    database?.let { db ->
-                        val scope = CoroutineScope(Dispatchers.IO)
-                        scope.launch {
-                            val watchState = when (download.contentType) {
-                                Download.ContentType.MOVIE -> {
-                                    db.movieDao().getById(actualItemId)
-                                }
-                                Download.ContentType.EPISODE -> {
-                                    db.episodeDao().getById(actualItemId)
-                                }
-                                else -> null
-                            }
-                            
-                            val stateLabel = when {
-                                watchState?.isWatched == true -> {
-                                    itemView.context.getString(R.string.download_status_watched)
-                                }
-                                watchState?.watchHistory != null -> {
-                                    itemView.context.getString(R.string.download_status_watching)
-                                }
-                                else -> {
-                                    itemView.context.getString(R.string.download_status_downloaded)
-                                }
-                            }
-                            
-                            withContext(Dispatchers.Main) {
-                                tvStatus.text = stateLabel
-                                tvStatus.visibility = View.VISIBLE
-                            }
-                        }
-                    } ?: run {
-                        tvStatus.text = itemView.context.getString(R.string.download_status_downloaded)
-                        tvStatus.visibility = View.VISIBLE
-                    }
-                }
-
-                else -> {
-                    progressBar.visibility = View.GONE
-                    tvProgressPercent.visibility = View.GONE
-                    btnAction.visibility = View.GONE
-                    tvStatus.text = progressInfo?.status.orEmpty()
-                    tvStatus.visibility = if (tvStatus.text.isEmpty()) View.GONE else View.VISIBLE
-                }
-            }
+            updateDownloadState(download)
 
             btnAction.setOnClickListener { onPlayClick(download) }
             btnDelete.setOnClickListener { onDeleteClick(download) }
@@ -308,55 +265,51 @@ class DownloadsAdapter(
             }
         }
 
-        fun updateProgressOnly(progressInfo: DownloadProgress) {
-            progressBar.progress = progressInfo.progress
-            tvProgressPercent.text = "${progressInfo.progress}%"
-            tvStatus.text = progressInfo.status
-            tvStatus.visibility = if (progressInfo.status.isEmpty()) View.GONE else View.VISIBLE
-        }
-
-        fun updateProgress(download: Download) {
+        fun updateDownloadState(download: Download) {
             val progressInfo = progressMap[download.id]
-            
+
             when (download.status) {
                 Download.DownloadStatus.DOWNLOADING,
                 Download.DownloadStatus.QUEUED,
                 Download.DownloadStatus.PAUSED -> {
+                    progressBar.visibility = View.VISIBLE
+                    tvProgressPercent.visibility = View.VISIBLE
                     progressBar.progress = progressInfo?.progress ?: download.progress
                     tvProgressPercent.text = "${progressBar.progress}%"
+                    btnAction.visibility = View.GONE
                     tvStatus.text = progressInfo?.status.orEmpty()
                     tvStatus.visibility = if (tvStatus.text.isEmpty()) View.GONE else View.VISIBLE
                 }
-                
+
                 Download.DownloadStatus.COMPLETED -> {
                     progressBar.visibility = View.GONE
                     tvProgressPercent.visibility = View.GONE
                     btnAction.visibility = View.VISIBLE
-                    
+
                     val actualItemId = when (download.contentType) {
                         Download.ContentType.MOVIE -> download.id.removePrefix("movie_")
                         Download.ContentType.EPISODE -> download.id.removePrefix("episode_")
-                        else -> download.id
                     }
-                    
+
                     database?.let { db ->
                         val scope = CoroutineScope(Dispatchers.IO)
                         scope.launch {
                             val watchState = when (download.contentType) {
                                 Download.ContentType.MOVIE -> db.movieDao().getById(actualItemId)
                                 Download.ContentType.EPISODE -> db.episodeDao().getById(actualItemId)
-                                else -> null
                             }
-                            
+
                             val stateLabel = when {
                                 watchState?.isWatched == true -> itemView.context.getString(R.string.download_status_watched)
                                 watchState?.watchHistory != null -> itemView.context.getString(R.string.download_status_watching)
                                 else -> itemView.context.getString(R.string.download_status_downloaded)
                             }
-                            
+
                             withContext(Dispatchers.Main) {
-                                tvStatus.text = stateLabel
-                                tvStatus.visibility = View.VISIBLE
+                                if (boundDownloadId == download.id) {
+                                    tvStatus.text = stateLabel
+                                    tvStatus.visibility = View.VISIBLE
+                                }
                             }
                         }
                     } ?: run {
@@ -364,11 +317,71 @@ class DownloadsAdapter(
                         tvStatus.visibility = View.VISIBLE
                     }
                 }
-                
+
                 else -> {
+                    progressBar.visibility = View.GONE
+                    tvProgressPercent.visibility = View.GONE
+                    btnAction.visibility = View.GONE
                     tvStatus.text = progressInfo?.status.orEmpty()
                     tvStatus.visibility = if (tvStatus.text.isEmpty()) View.GONE else View.VISIBLE
                 }
+            }
+
+            updateFocusNavigation(download.status)
+        }
+
+        private fun updateFocusNavigation(status: Download.DownloadStatus) {
+            val actionVisible = status == Download.DownloadStatus.COMPLETED
+            root.nextFocusRightId = if (actionVisible) R.id.btnAction else R.id.btnDelete
+            btnAction.nextFocusLeftId = R.id.downloadItemRoot
+            btnAction.nextFocusRightId = R.id.btnDelete
+            btnAction.nextFocusDownId = R.id.btnDelete
+            btnDelete.nextFocusLeftId = if (actionVisible) R.id.btnAction else R.id.downloadItemRoot
+            btnDelete.nextFocusRightId = R.id.btnDelete
+            btnDelete.nextFocusUpId = if (actionVisible) R.id.btnAction else R.id.btnDelete
+        }
+
+        fun updateProgressOnly(progressInfo: DownloadProgress) {
+            progressBar.progress = progressInfo.progress
+            tvProgressPercent.text = "${progressInfo.progress}%"
+            tvStatus.text = progressInfo.status
+            tvStatus.visibility = if (progressInfo.status.isEmpty()) View.GONE else View.VISIBLE
+        }
+    }
+
+    private class DownloadDiffCallback(
+        private val oldItems: List<DownloadItem>,
+        private val newItems: List<DownloadItem>
+    ) : DiffUtil.Callback() {
+        override fun getOldListSize(): Int = oldItems.size
+
+        override fun getNewListSize(): Int = newItems.size
+
+        override fun areItemsTheSame(oldItemPosition: Int, newItemPosition: Int): Boolean {
+            val oldItem = oldItems[oldItemPosition]
+            val newItem = newItems[newItemPosition]
+            return when {
+                oldItem is DownloadItem.Download && newItem is DownloadItem.Download ->
+                    oldItem.download.id == newItem.download.id
+                oldItem is DownloadItem.Header && newItem is DownloadItem.Header ->
+                    oldItem.tvShowId == newItem.tvShowId &&
+                        oldItem.tvShowTitle == newItem.tvShowTitle &&
+                        oldItem.seasonNumber == newItem.seasonNumber
+                else -> false
+            }
+        }
+
+        override fun areContentsTheSame(oldItemPosition: Int, newItemPosition: Int): Boolean {
+            return oldItems[oldItemPosition] == newItems[newItemPosition]
+        }
+
+        override fun getChangePayload(oldItemPosition: Int, newItemPosition: Int): Any? {
+            return if (oldItems[oldItemPosition] is DownloadItem.Download &&
+                newItems[newItemPosition] is DownloadItem.Download
+            ) {
+                Unit
+            } else {
+                null
             }
         }
     }

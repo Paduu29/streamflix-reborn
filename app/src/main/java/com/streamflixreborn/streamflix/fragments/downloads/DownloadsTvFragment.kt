@@ -51,8 +51,12 @@ class DownloadsTvFragment : Fragment() {
     private var observeDownloadsJob: Job? = null
     private var cachedHeaderHeight = 0
     private var pendingScrollToTop = false
-    private var lastFocusedDownloadId: String? = null
-    private var restoreFocusAfterDelete = false
+    private var pendingFocusRecovery: FocusRecoveryRequest? = null
+
+    private data class FocusRecoveryRequest(
+        val deletedDownloadId: String,
+        val previousAdapterPosition: Int,
+    )
 
     enum class Tab {
         ALL, MOVIES, EPISODES, DOWNLOADING
@@ -76,7 +80,7 @@ class DownloadsTvFragment : Fragment() {
         observeDownloadProgress()
         updateStorageInfo()
 
-        binding.tabAll.requestFocus()
+        getSelectedTabButton().requestFocus()
 
         binding.tabLayout.setOnFocusChangeListener { _, hasFocus ->
             if (hasFocus) {
@@ -99,22 +103,6 @@ class DownloadsTvFragment : Fragment() {
 
     private fun setupRecyclerView() {
         binding.rvDownloads.adapter = adapter
-
-        binding.rvDownloads.addOnChildAttachStateChangeListener(object : androidx.recyclerview.widget.RecyclerView.OnChildAttachStateChangeListener {
-            override fun onChildViewAttachedToWindow(view: View) {}
-            override fun onChildViewDetachedFromWindow(view: View) {
-                if (view.hasFocus()) {
-                    val viewHolder = binding.rvDownloads.findContainingViewHolder(view)
-                    val position = viewHolder?.bindingAdapterPosition ?: -1
-                    if (position >= 0) {
-                        val item = adapter.getCurrentList().getOrNull(position)
-                        if (item is DownloadItem.Download) {
-                            lastFocusedDownloadId = item.download.id
-                        }
-                    }
-                }
-            }
-        })
 
         binding.rvDownloads.setOnKeyListener { _, keyCode, event ->
             if (event.action != KeyEvent.ACTION_DOWN) return@setOnKeyListener false
@@ -285,43 +273,9 @@ class DownloadsTvFragment : Fragment() {
 
             flow.collectLatest { downloads ->
                 withContext(Dispatchers.Main) {
-                    val previousItems = adapter.getCurrentList().toList()
-                    val previousSize = previousItems.size
-
                     val groupedItems = groupDownloads(downloads)
                     adapter.submitList(groupedItems)
-
-                    if (previousSize > groupedItems.size && lastFocusedDownloadId != null) {
-                        restoreFocusAfterDelete = true
-                        binding.rvDownloads.post {
-                            restoreFocusAfterDelete = false
-                            val idToFocus = lastFocusedDownloadId ?: return@post
-                            val newPosition = groupedItems.indexOfFirst { item ->
-                                item is DownloadItem.Download && item.download.id == idToFocus
-                            }
-                            val targetPosition = if (newPosition >= 0) {
-                                newPosition
-                            } else {
-                                val deletedIndex = previousItems.indexOfFirst { item ->
-                                    item is DownloadItem.Download && item.download.id == idToFocus
-                                }
-                                if (deletedIndex >= 0) {
-                                    var next = deletedIndex
-                                    while (next < groupedItems.size && groupedItems[next] !is DownloadItem.Download) next++
-                                    if (next < groupedItems.size) next else {
-                                        var prev = deletedIndex - 1
-                                        while (prev >= 0 && groupedItems[prev] !is DownloadItem.Download) prev--
-                                        prev
-                                    }
-                                } else -1
-                            }
-
-                            if (targetPosition >= 0) {
-                                focusDownloadPosition(targetPosition, groupedItems)
-                            }
-                            lastFocusedDownloadId = null
-                        }
-                    }
+                    maybeRecoverFocusAfterListMutation(groupedItems)
 
                     if (pendingScrollToTop) {
                         pendingScrollToTop = false
@@ -333,7 +287,7 @@ class DownloadsTvFragment : Fragment() {
                     binding.rvDownloads.isFocusable = groupedItems.isNotEmpty()
                     binding.rvDownloads.isFocusableInTouchMode = groupedItems.isNotEmpty()
                     if (groupedItems.isEmpty() && binding.rvDownloads.hasFocus()) {
-                        binding.tabAll.requestFocus()
+                        getSelectedTabButton().requestFocus()
                     }
                 }
             }
@@ -521,7 +475,10 @@ class DownloadsTvFragment : Fragment() {
         if (position >= 0) {
             val item = adapter.getCurrentList().getOrNull(position)
             if (item is DownloadItem.Download) {
-                lastFocusedDownloadId = item.download.id
+                pendingFocusRecovery = FocusRecoveryRequest(
+                    deletedDownloadId = item.download.id,
+                    previousAdapterPosition = position,
+                )
             }
         }
 
@@ -531,7 +488,12 @@ class DownloadsTvFragment : Fragment() {
             .setPositiveButton(R.string.download_delete) { _, _ ->
                 deleteDownload(download)
             }
-            .setNegativeButton(android.R.string.cancel, null)
+            .setNegativeButton(android.R.string.cancel) { _, _ ->
+                pendingFocusRecovery = null
+            }
+            .setOnCancelListener {
+                pendingFocusRecovery = null
+            }
             .show()
     }
 
@@ -559,6 +521,60 @@ class DownloadsTvFragment : Fragment() {
 
             updateStorageInfo()
             Toast.makeText(requireContext(), "Download deleted", Toast.LENGTH_SHORT).show()
+        }
+    }
+
+    private fun maybeRecoverFocusAfterListMutation(groupedItems: List<DownloadItem>) {
+        val recovery = pendingFocusRecovery ?: run {
+            return
+        }
+
+        val deletedStillExists = groupedItems.any { item ->
+            item is DownloadItem.Download && item.download.id == recovery.deletedDownloadId
+        }
+        if (deletedStillExists) return
+
+        pendingFocusRecovery = null
+
+        binding.rvDownloads.post {
+            if (!isAdded || view == null) return@post
+
+            val targetPosition = findNearestValidDownloadPosition(
+                startPosition = recovery.previousAdapterPosition,
+                items = groupedItems,
+            )
+
+            if (targetPosition != null) {
+                focusDownloadPosition(targetPosition, groupedItems)
+            } else {
+                binding.rvDownloads.clearFocus()
+                getSelectedTabButton().requestFocus()
+            }
+        }
+    }
+
+    private fun findNearestValidDownloadPosition(
+        startPosition: Int,
+        items: List<DownloadItem>,
+    ): Int? {
+        if (items.isEmpty()) return null
+
+        val boundedStart = startPosition.coerceIn(0, items.lastIndex)
+        for (index in boundedStart until items.size) {
+            if (items.getOrNull(index) is DownloadItem.Download) return index
+        }
+        for (index in boundedStart - 1 downTo 0) {
+            if (items.getOrNull(index) is DownloadItem.Download) return index
+        }
+        return null
+    }
+
+    private fun getSelectedTabButton(): Button {
+        return when (currentTab) {
+            Tab.ALL -> binding.tabAll
+            Tab.MOVIES -> binding.tabMovies
+            Tab.EPISODES -> binding.tabEpisodes
+            Tab.DOWNLOADING -> binding.tabDownloading
         }
     }
 }
