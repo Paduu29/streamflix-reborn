@@ -19,6 +19,10 @@ import com.streamflixreborn.streamflix.databinding.ItemDownloadHeaderTvBinding
 import com.streamflixreborn.streamflix.databinding.ItemDownloadMobileBinding
 import com.streamflixreborn.streamflix.databinding.ItemDownloadTvBinding
 import com.streamflixreborn.streamflix.models.Download
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
 
 sealed class DownloadItem {
     data class Header(
@@ -49,6 +53,8 @@ class DownloadsAdapter(
 
     private val items = mutableListOf<DownloadItem>()
     var progressMap: Map<String, DownloadProgress> = emptyMap()
+    
+    private val activeHolders = mutableMapOf<String, ItemViewHolder>()
 
     data class DownloadProgress(
         val progress: Int,
@@ -111,6 +117,29 @@ class DownloadsAdapter(
     }
 
     override fun getItemCount(): Int = items.size
+
+    override fun onViewAttachedToWindow(holder: RecyclerView.ViewHolder) {
+        super.onViewAttachedToWindow(holder)
+        if (holder is ItemViewHolder) {
+            val download = items.getOrNull(holder.bindingAdapterPosition) as? DownloadItem.Download
+            download?.let { activeHolders[it.download.id] = holder }
+        }
+    }
+
+    override fun onViewDetachedFromWindow(holder: RecyclerView.ViewHolder) {
+        super.onViewDetachedFromWindow(holder)
+        if (holder is ItemViewHolder) {
+            val download = items.getOrNull(holder.bindingAdapterPosition) as? DownloadItem.Download
+            download?.let { activeHolders.remove(it.download.id) }
+        }
+    }
+
+    fun updateDownloadProgress(downloadId: String, progress: DownloadProgress) {
+        val progressInfo = progressMap[downloadId] ?: progress
+        activeHolders[downloadId]?.let { holder ->
+            holder.updateProgressOnly(progressInfo)
+        }
+    }
 
     inner class HeaderViewHolder(binding: ViewBinding) :
         RecyclerView.ViewHolder(binding.root) {
@@ -191,9 +220,7 @@ class DownloadsAdapter(
             }
 
             val progressInfo = progressMap[download.id]
-            tvStatus.text = progressInfo?.status.orEmpty()
-            tvStatus.visibility = if (tvStatus.text.isEmpty()) View.GONE else View.VISIBLE
-
+            
             when (download.status) {
                 Download.DownloadStatus.DOWNLOADING,
                 Download.DownloadStatus.QUEUED,
@@ -203,18 +230,63 @@ class DownloadsAdapter(
                     progressBar.progress = progressInfo?.progress ?: download.progress
                     tvProgressPercent.text = "${progressBar.progress}%"
                     btnAction.visibility = View.GONE
+                    tvStatus.text = progressInfo?.status.orEmpty()
+                    tvStatus.visibility = if (tvStatus.text.isEmpty()) View.GONE else View.VISIBLE
                 }
 
                 Download.DownloadStatus.COMPLETED -> {
                     progressBar.visibility = View.GONE
                     tvProgressPercent.visibility = View.GONE
                     btnAction.visibility = View.VISIBLE
+                    
+                    val actualItemId = when (download.contentType) {
+                        Download.ContentType.MOVIE -> download.id.removePrefix("movie_")
+                        Download.ContentType.EPISODE -> download.id.removePrefix("episode_")
+                        else -> download.id
+                    }
+                    
+                    database?.let { db ->
+                        val scope = CoroutineScope(Dispatchers.IO)
+                        scope.launch {
+                            val watchState = when (download.contentType) {
+                                Download.ContentType.MOVIE -> {
+                                    db.movieDao().getById(actualItemId)
+                                }
+                                Download.ContentType.EPISODE -> {
+                                    db.episodeDao().getById(actualItemId)
+                                }
+                                else -> null
+                            }
+                            
+                            val stateLabel = when {
+                                watchState?.isWatched == true -> {
+                                    itemView.context.getString(R.string.download_status_watched)
+                                }
+                                watchState?.watchHistory != null -> {
+                                    itemView.context.getString(R.string.download_status_watching)
+                                }
+                                else -> {
+                                    itemView.context.getString(R.string.download_status_downloaded)
+                                }
+                            }
+                            
+                            withContext(Dispatchers.Main) {
+                                tvStatus.text = stateLabel
+                                tvStatus.visibility = View.VISIBLE
+                            }
+                        }
+                    } ?: run {
+                        tvStatus.text = itemView.context.getString(R.string.download_status_downloaded)
+                        tvStatus.visibility = View.VISIBLE
+                    }
                 }
 
                 else -> {
                     progressBar.visibility = View.GONE
                     tvProgressPercent.visibility = View.GONE
                     btnAction.visibility = View.GONE
+                    tvStatus.text = progressInfo?.status.orEmpty()
+                    tvStatus.visibility = if (tvStatus.text.isEmpty()) View.GONE else View.VISIBLE
                 }
             }
 
@@ -236,12 +308,68 @@ class DownloadsAdapter(
             }
         }
 
+        fun updateProgressOnly(progressInfo: DownloadProgress) {
+            progressBar.progress = progressInfo.progress
+            tvProgressPercent.text = "${progressInfo.progress}%"
+            tvStatus.text = progressInfo.status
+            tvStatus.visibility = if (progressInfo.status.isEmpty()) View.GONE else View.VISIBLE
+        }
+
         fun updateProgress(download: Download) {
             val progressInfo = progressMap[download.id]
-            progressBar.progress = progressInfo?.progress ?: download.progress
-            tvProgressPercent.text = "${progressBar.progress}%"
-            tvStatus.text = progressInfo?.status.orEmpty()
-            tvStatus.visibility = if (tvStatus.text.isEmpty()) View.GONE else View.VISIBLE
+            
+            when (download.status) {
+                Download.DownloadStatus.DOWNLOADING,
+                Download.DownloadStatus.QUEUED,
+                Download.DownloadStatus.PAUSED -> {
+                    progressBar.progress = progressInfo?.progress ?: download.progress
+                    tvProgressPercent.text = "${progressBar.progress}%"
+                    tvStatus.text = progressInfo?.status.orEmpty()
+                    tvStatus.visibility = if (tvStatus.text.isEmpty()) View.GONE else View.VISIBLE
+                }
+                
+                Download.DownloadStatus.COMPLETED -> {
+                    progressBar.visibility = View.GONE
+                    tvProgressPercent.visibility = View.GONE
+                    btnAction.visibility = View.VISIBLE
+                    
+                    val actualItemId = when (download.contentType) {
+                        Download.ContentType.MOVIE -> download.id.removePrefix("movie_")
+                        Download.ContentType.EPISODE -> download.id.removePrefix("episode_")
+                        else -> download.id
+                    }
+                    
+                    database?.let { db ->
+                        val scope = CoroutineScope(Dispatchers.IO)
+                        scope.launch {
+                            val watchState = when (download.contentType) {
+                                Download.ContentType.MOVIE -> db.movieDao().getById(actualItemId)
+                                Download.ContentType.EPISODE -> db.episodeDao().getById(actualItemId)
+                                else -> null
+                            }
+                            
+                            val stateLabel = when {
+                                watchState?.isWatched == true -> itemView.context.getString(R.string.download_status_watched)
+                                watchState?.watchHistory != null -> itemView.context.getString(R.string.download_status_watching)
+                                else -> itemView.context.getString(R.string.download_status_downloaded)
+                            }
+                            
+                            withContext(Dispatchers.Main) {
+                                tvStatus.text = stateLabel
+                                tvStatus.visibility = View.VISIBLE
+                            }
+                        }
+                    } ?: run {
+                        tvStatus.text = itemView.context.getString(R.string.download_status_downloaded)
+                        tvStatus.visibility = View.VISIBLE
+                    }
+                }
+                
+                else -> {
+                    tvStatus.text = progressInfo?.status.orEmpty()
+                    tvStatus.visibility = if (tvStatus.text.isEmpty()) View.GONE else View.VISIBLE
+                }
+            }
         }
     }
 }

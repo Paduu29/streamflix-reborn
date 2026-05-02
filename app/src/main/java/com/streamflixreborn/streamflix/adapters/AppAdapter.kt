@@ -517,27 +517,27 @@ class AppAdapter(
             )
             is EpisodeViewHolder -> holder.bind(
                 items[adjustedPosition] as Episode
-            ) // Tu original no pasaba listener, lo respeto
+            )
             is FooterViewHolder -> footer?.bind?.invoke(holder.binding)
             is GenreViewHolder -> holder.bind(
                 items[adjustedPosition] as Genre
-            ) // Tu original no pasaba listener, lo respeto
+            )
             is HeaderViewHolder -> header?.bind?.invoke(holder.binding)
             is MovieViewHolder -> holder.bind(
                 items[adjustedPosition] as Movie
-            ) // Los listeners se manejan dentro del ViewHolder
+            )
             is PeopleViewHolder -> holder.bind(
                 items[adjustedPosition] as People
-            ) // Tu original no pasaba listener, lo respeto
+            )
             is ProviderViewHolder -> holder.bind(
                 items[adjustedPosition] as Provider
-            ) // Tu original no pasaba listener, lo respeto
+            )
             is SeasonViewHolder -> holder.bind(
                 items[adjustedPosition] as Season
-            ) // Tu original no pasaba listener, lo respeto
+            )
             is TvShowViewHolder -> holder.bind(
                 items[adjustedPosition] as TvShow
-            ) // Los listeners se manejan dentro del ViewHolder
+            )
         }
 
         val state = states[holder.layoutPosition]
@@ -547,6 +547,14 @@ class AppAdapter(
                 is MovieViewHolder -> holder.childRecyclerView?.layoutManager?.onRestoreInstanceState(state)
                 is TvShowViewHolder -> holder.childRecyclerView?.layoutManager?.onRestoreInstanceState(state)
             }
+        }
+    }
+
+    override fun onBindViewHolder(holder: RecyclerView.ViewHolder, position: Int, payloads: MutableList<Any>) {
+        if (payloads.isNotEmpty() && holder is EpisodeViewHolder && payloads[0] == "download_state") {
+            holder.updateDownloadState()
+        } else {
+            onBindViewHolder(holder, position)
         }
     }
 

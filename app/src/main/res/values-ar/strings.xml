@@ -551,4 +551,6 @@
     <string name="settings_download_quality_high">عالية</string>
     <string name="settings_download_quality_medium">متوسطة</string>
     <string name="settings_download_quality_low">منخفضة</string>
+    <string name="settings_screen_download_title">إعدادات التنزيل</string>
+    <string name="settings_screen_download_summary">الجودة والتفضيلات للمحتوى غير المتصل</string>
 </resources>

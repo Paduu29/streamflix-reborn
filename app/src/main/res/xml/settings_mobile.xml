@@ -106,18 +106,8 @@
         </PreferenceCategory>
 
         <PreferenceCategory
-            android:key="pc_extra_buffering_settings"
             android:title="@string/player_settings_extra_buffer_title"
             app:iconSpaceReserved="false">
-
-            <ListPreference
-                android:key="DOWNLOAD_QUALITY"
-                android:title="@string/settings_download_quality_title"
-                android:summary="@string/settings_download_quality_summary"
-                android:entries="@array/download_quality_entries"
-                android:entryValues="@array/download_quality_values"
-                android:defaultValue="BEST"
-                app:iconSpaceReserved="false" />
 
             <SwitchPreference
                 android:key="FORCE_EXTRA_BUFFERING"
@@ -171,6 +161,28 @@
                 android:title="@string/settings_server_voe_title"
                 android:summary="@string/settings_server_voe_summary"
                 android:defaultValue="true"
+                app:iconSpaceReserved="false" />
+        </PreferenceCategory>
+    </PreferenceScreen>
+
+    <PreferenceScreen
+        android:key="screen_download"
+        android:title="@string/settings_screen_download_title"
+        android:summary="@string/settings_screen_download_summary"
+        android:widgetLayout="@layout/preference_widget_chevron"
+        app:iconSpaceReserved="false">
+
+        <PreferenceCategory
+            android:title="@string/settings_download_quality_title"
+            app:iconSpaceReserved="false">
+
+            <ListPreference
+                android:key="DOWNLOAD_QUALITY"
+                android:title="@string/settings_download_quality_title"
+                android:summary="@string/settings_download_quality_summary"
+                android:entries="@array/download_quality_entries"
+                android:entryValues="@array/download_quality_values"
+                android:defaultValue="BEST"
                 app:iconSpaceReserved="false" />
         </PreferenceCategory>
     </PreferenceScreen>

@@ -558,4 +558,6 @@
     <string name="settings_download_quality_high">Haute</string>
     <string name="settings_download_quality_medium">Moyenne</string>
     <string name="settings_download_quality_low">Basse</string>
+    <string name="settings_screen_download_title">Paramètres de téléchargement</string>
+    <string name="settings_screen_download_summary">Qualité et préférences pour le contenu hors ligne</string>
 </resources>

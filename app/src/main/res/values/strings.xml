@@ -562,5 +562,7 @@
     <string name="settings_download_quality_best">Best</string>
     <string name="settings_download_quality_high">High</string>
     <string name="settings_download_quality_medium">Medium</string>
+    <string name="settings_screen_download_title">Download Settings</string>
+    <string name="settings_screen_download_summary">Quality and preferences for offline content</string>
     <string name="settings_download_quality_low">Low</string>
 </resources>

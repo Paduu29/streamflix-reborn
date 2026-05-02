@@ -146,10 +146,18 @@ class SeasonMobileFragment : Fragment() {
         }
     }
 
+    private var lastDownloadStates: Map<String, Download.DownloadStatus?> = emptyMap()
+
     private fun refreshEpisodeStates() {
         if (currentEpisodes.isEmpty()) return
         for (i in currentEpisodes.indices) {
-            appAdapter.notifyItemChanged(i)
+            val episode = currentEpisodes[i]
+            val downloadId = "episode_${episode.id}"
+            val currentStatus = database.downloadDao().getDownloadById(downloadId)?.status
+            if (currentStatus != lastDownloadStates[downloadId]) {
+                appAdapter.notifyItemChanged(i, "download_state")
+                lastDownloadStates = lastDownloadStates + (downloadId to currentStatus)
+            }
         }
     }
 

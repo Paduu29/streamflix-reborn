@@ -138,16 +138,17 @@ class SeasonTvFragment : Fragment() {
         }
     }
 
-    private var lastDownloadStatuses: Map<String, Download.DownloadStatus> = emptyMap()
+    private var lastDownloadStatuses: Map<String, Download.DownloadStatus?> = emptyMap()
 
     private fun observeDownloadChanges() {
         viewLifecycleOwner.lifecycleScope.launch {
             database.downloadDao().getAllDownloads().flowWithLifecycle(lifecycle, Lifecycle.State.STARTED).collect { downloads ->
-                val currentStatuses = downloads.associate { it.id to it.status }
-                val statusChanged = currentStatuses != lastDownloadStatuses
-                lastDownloadStatuses = currentStatuses
-                if (statusChanged) {
-                    refreshEpisodeStates()
+                for (download in downloads) {
+                    if (download.status != lastDownloadStatuses[download.id]) {
+                        lastDownloadStatuses = lastDownloadStatuses + (download.id to download.status)
+                        refreshEpisodeStates()
+                        break
+                    }
                 }
             }
         }
@@ -156,7 +157,13 @@ class SeasonTvFragment : Fragment() {
     private fun refreshEpisodeStates() {
         if (currentEpisodes.isEmpty()) return
         for (i in currentEpisodes.indices) {
-            appAdapter.notifyItemChanged(i)
+            val episode = currentEpisodes[i]
+            val downloadId = "episode_${episode.id}"
+            val currentStatus = database.downloadDao().getDownloadById(downloadId)?.status
+            if (currentStatus != lastDownloadStatuses[downloadId]) {
+                appAdapter.notifyItemChanged(i, "download_state")
+                lastDownloadStatuses = lastDownloadStatuses + (downloadId to currentStatus)
+            }
         }
     }
 

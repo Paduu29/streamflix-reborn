@@ -51,6 +51,8 @@ class DownloadsTvFragment : Fragment() {
     private var observeDownloadsJob: Job? = null
     private var cachedHeaderHeight = 0
     private var pendingScrollToTop = false
+    private var lastFocusedDownloadId: String? = null
+    private var restoreFocusAfterDelete = false
 
     enum class Tab {
         ALL, MOVIES, EPISODES, DOWNLOADING
@@ -97,6 +99,22 @@ class DownloadsTvFragment : Fragment() {
 
     private fun setupRecyclerView() {
         binding.rvDownloads.adapter = adapter
+
+        binding.rvDownloads.addOnChildAttachStateChangeListener(object : androidx.recyclerview.widget.RecyclerView.OnChildAttachStateChangeListener {
+            override fun onChildViewAttachedToWindow(view: View) {}
+            override fun onChildViewDetachedFromWindow(view: View) {
+                if (view.hasFocus()) {
+                    val viewHolder = binding.rvDownloads.findContainingViewHolder(view)
+                    val position = viewHolder?.bindingAdapterPosition ?: -1
+                    if (position >= 0) {
+                        val item = adapter.getCurrentList().getOrNull(position)
+                        if (item is DownloadItem.Download) {
+                            lastFocusedDownloadId = item.download.id
+                        }
+                    }
+                }
+            }
+        })
 
         binding.rvDownloads.setOnKeyListener { _, keyCode, event ->
             if (event.action != KeyEvent.ACTION_DOWN) return@setOnKeyListener false
@@ -267,8 +285,44 @@ class DownloadsTvFragment : Fragment() {
 
             flow.collectLatest { downloads ->
                 withContext(Dispatchers.Main) {
+                    val previousItems = adapter.getCurrentList().toList()
+                    val previousSize = previousItems.size
+
                     val groupedItems = groupDownloads(downloads)
                     adapter.submitList(groupedItems)
+
+                    if (previousSize > groupedItems.size && lastFocusedDownloadId != null) {
+                        restoreFocusAfterDelete = true
+                        binding.rvDownloads.post {
+                            restoreFocusAfterDelete = false
+                            val idToFocus = lastFocusedDownloadId ?: return@post
+                            val newPosition = groupedItems.indexOfFirst { item ->
+                                item is DownloadItem.Download && item.download.id == idToFocus
+                            }
+                            val targetPosition = if (newPosition >= 0) {
+                                newPosition
+                            } else {
+                                val deletedIndex = previousItems.indexOfFirst { item ->
+                                    item is DownloadItem.Download && item.download.id == idToFocus
+                                }
+                                if (deletedIndex >= 0) {
+                                    var next = deletedIndex
+                                    while (next < groupedItems.size && groupedItems[next] !is DownloadItem.Download) next++
+                                    if (next < groupedItems.size) next else {
+                                        var prev = deletedIndex - 1
+                                        while (prev >= 0 && groupedItems[prev] !is DownloadItem.Download) prev--
+                                        prev
+                                    }
+                                } else -1
+                            }
+
+                            if (targetPosition >= 0) {
+                                focusDownloadPosition(targetPosition, groupedItems)
+                            }
+                            lastFocusedDownloadId = null
+                        }
+                    }
+
                     if (pendingScrollToTop) {
                         pendingScrollToTop = false
                         if (groupedItems.isNotEmpty()) {
@@ -350,10 +404,7 @@ class DownloadsTvFragment : Fragment() {
                 for ((id, newProgress) in adapterProgress) {
                     val oldProgress = lastProgressMap[id]
                     if (newProgress != oldProgress) {
-                        val position = adapter.indexOfDownload(id)
-                        if (position >= 0) {
-                            adapter.notifyItemChanged(position, Any())
-                        }
+                        adapter.updateDownloadProgress(id, newProgress)
                     }
                 }
 
@@ -464,6 +515,16 @@ class DownloadsTvFragment : Fragment() {
     }
 
     private fun showDeleteConfirmation(download: Download) {
+        val focusedChild = binding.rvDownloads.findFocus()
+        val viewHolder = focusedChild?.let { binding.rvDownloads.findContainingViewHolder(it) }
+        val position = viewHolder?.bindingAdapterPosition ?: -1
+        if (position >= 0) {
+            val item = adapter.getCurrentList().getOrNull(position)
+            if (item is DownloadItem.Download) {
+                lastFocusedDownloadId = item.download.id
+            }
+        }
+
         AlertDialog.Builder(requireContext())
             .setTitle(R.string.download_delete_confirm)
             .setMessage(R.string.download_delete_message)

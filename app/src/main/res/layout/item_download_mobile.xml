@@ -55,30 +55,36 @@
             app:layout_constraintStart_toStartOf="parent"
             app:layout_constraintTop_toBottomOf="@id/sectionHeader" />
 
-        <ImageButton
-            android:id="@+id/btnAction"
-            android:layout_width="36dp"
-            android:layout_height="36dp"
-            android:background="@drawable/bg_download_button"
-            android:contentDescription="@string/download_play"
-            android:src="@drawable/ic_play"
-            app:layout_constraintBottom_toBottomOf="@id/ivPoster"
+        <LinearLayout
+            android:id="@+id/actionColumn"
+            android:layout_width="44dp"
+            android:layout_height="wrap_content"
+            android:orientation="vertical"
+            android:gravity="center_horizontal"
+            android:paddingEnd="4dp"
             app:layout_constraintEnd_toEndOf="parent"
-            app:layout_constraintTop_toTopOf="@id/ivPoster"
-            app:tint="?android:attr/textColorPrimary" />
+            app:layout_constraintTop_toTopOf="@id/ivPoster">
 
-        <ImageButton
-            android:id="@+id/btnDelete"
-            android:layout_width="28dp"
-            android:layout_height="28dp"
-            android:layout_marginTop="8dp"
-            android:background="@drawable/bg_download_button"
-            android:contentDescription="@string/download_delete"
-            android:src="@drawable/ic_delete"
-            app:layout_constraintEnd_toEndOf="@id/btnAction"
-            app:layout_constraintStart_toStartOf="@id/btnAction"
-            app:layout_constraintTop_toBottomOf="@id/btnAction"
-            app:tint="?attr/colorAccent" />
+            <ImageButton
+                android:id="@+id/btnAction"
+                android:layout_width="36dp"
+                android:layout_height="36dp"
+                android:background="@drawable/bg_download_button"
+                android:contentDescription="@string/download_play"
+                android:src="@drawable/ic_play"
+                app:tint="?android:attr/textColorPrimary" />
+
+            <ImageButton
+                android:id="@+id/btnDelete"
+                android:layout_width="28dp"
+                android:layout_height="28dp"
+                android:layout_marginTop="8dp"
+                android:background="@drawable/bg_download_button"
+                android:contentDescription="@string/download_delete"
+                android:src="@drawable/ic_delete"
+                app:tint="?attr/colorAccent" />
+
+        </LinearLayout>
 
         <TextView
             android:id="@+id/tvTitle"
@@ -91,7 +97,7 @@
             android:textColor="?android:attr/textColorPrimary"
             android:textSize="14sp"
             android:textStyle="bold"
-            app:layout_constraintEnd_toStartOf="@id/btnAction"
+            app:layout_constraintEnd_toStartOf="@id/actionColumn"
             app:layout_constraintStart_toEndOf="@id/ivPoster"
             app:layout_constraintTop_toTopOf="@id/ivPoster" />
 
@@ -106,7 +112,7 @@
             android:maxLines="1"
             android:textColor="?android:attr/textColorSecondary"
             android:textSize="12sp"
-            app:layout_constraintEnd_toStartOf="@id/btnAction"
+            app:layout_constraintEnd_toStartOf="@id/actionColumn"
             app:layout_constraintStart_toEndOf="@id/ivPoster"
             app:layout_constraintTop_toBottomOf="@id/tvTitle" />
 
@@ -121,7 +127,7 @@
             android:max="100"
             android:progress="0"
             android:visibility="gone"
-            app:layout_constraintEnd_toStartOf="@id/btnAction"
+            app:layout_constraintEnd_toStartOf="@id/actionColumn"
             app:layout_constraintStart_toEndOf="@id/ivPoster"
             app:layout_constraintTop_toBottomOf="@id/tvSubtitle" />
 
@@ -148,8 +154,11 @@
             android:layout_marginEnd="8dp"
             android:textColor="?android:attr/textColorSecondary"
             android:textSize="11sp"
+            android:ellipsize="end"
+            android:maxLines="1"
+            android:hyphenationFrequency="none"
             android:visibility="gone"
-            app:layout_constraintEnd_toStartOf="@id/btnAction"
+            app:layout_constraintEnd_toStartOf="@id/actionColumn"
             app:layout_constraintStart_toEndOf="@id/tvProgressPercent"
             app:layout_constraintTop_toBottomOf="@id/progressBar" />
 

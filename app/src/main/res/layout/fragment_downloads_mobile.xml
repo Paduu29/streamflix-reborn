@@ -40,12 +40,13 @@
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
             android:background="?attr/app_background_color"
-            app:tabGravity="fill"
+            app:tabGravity="start"
             app:tabIndicatorColor="?attr/colorAccent"
             app:tabIndicatorFullWidth="true"
-            app:tabMode="fixed"
+            app:tabMode="scrollable"
             app:tabRippleColor="@android:color/transparent"
             app:tabSelectedTextColor="?android:attr/textColorPrimary"
+            app:tabTextAppearance="@style/TabLabelStyle"
             app:tabTextColor="?android:attr/textColorSecondary">
 
             <com.google.android.material.tabs.TabItem

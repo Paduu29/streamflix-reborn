@@ -66,6 +66,89 @@ class EpisodeViewHolder(
         }
     }
 
+    fun updateDownloadState() {
+        when (_binding) {
+            is ItemEpisodeMobileBinding -> updateMobileDownloadState(_binding)
+            is ItemEpisodeTvBinding -> updateTvDownloadState(_binding)
+            is ItemEpisodeContinueWatchingMobileBinding -> {}
+            is ItemEpisodeContinueWatchingTvBinding -> {}
+        }
+    }
+
+    private fun updateMobileDownloadState(binding: ItemEpisodeMobileBinding) {
+        val downloadId = "episode_${episode.id}"
+        val existingDownload = database.downloadDao().getDownloadById(downloadId)
+        val isDownloaded = existingDownload?.status == Download.DownloadStatus.COMPLETED || episode.isDownloaded
+
+        binding.btnEpisodeDownload.visibility = when {
+            existingDownload?.status == Download.DownloadStatus.DOWNLOADING -> View.GONE
+            existingDownload?.status == Download.DownloadStatus.QUEUED -> View.GONE
+            isDownloaded -> View.GONE
+            else -> View.VISIBLE
+        }
+
+        binding.btnEpisodeCancelDownload.visibility = when {
+            existingDownload?.status == Download.DownloadStatus.DOWNLOADING -> View.VISIBLE
+            existingDownload?.status == Download.DownloadStatus.QUEUED -> View.VISIBLE
+            else -> View.GONE
+        }
+
+        binding.btnEpisodePlayDownload.visibility = when {
+            isDownloaded -> View.VISIBLE
+            else -> View.GONE
+        }
+
+        val wasVisible = binding.pbEpisodeDownloadProgress.visibility == View.VISIBLE
+        binding.pbEpisodeDownloadProgress.visibility = when {
+            existingDownload?.status == Download.DownloadStatus.DOWNLOADING -> View.VISIBLE
+            existingDownload?.status == Download.DownloadStatus.QUEUED -> View.VISIBLE
+            else -> View.GONE
+        }
+
+        if (!wasVisible && binding.pbEpisodeDownloadProgress.visibility == View.VISIBLE) {
+            binding.pbEpisodeDownloadProgress.invalidate()
+            binding.pbEpisodeDownloadProgress.isIndeterminate = false
+            binding.pbEpisodeDownloadProgress.isIndeterminate = true
+        }
+    }
+
+    private fun updateTvDownloadState(binding: ItemEpisodeTvBinding) {
+        val downloadId = "episode_${episode.id}"
+        val existingDownload = database.downloadDao().getDownloadById(downloadId)
+        val isDownloaded = existingDownload?.status == Download.DownloadStatus.COMPLETED || episode.isDownloaded
+
+        binding.btnEpisodeDownload.visibility = when {
+            existingDownload?.status == Download.DownloadStatus.DOWNLOADING -> View.GONE
+            existingDownload?.status == Download.DownloadStatus.QUEUED -> View.GONE
+            isDownloaded -> View.GONE
+            else -> View.VISIBLE
+        }
+
+        binding.btnEpisodeCancelDownload.visibility = when {
+            existingDownload?.status == Download.DownloadStatus.DOWNLOADING -> View.VISIBLE
+            existingDownload?.status == Download.DownloadStatus.QUEUED -> View.VISIBLE
+            else -> View.GONE
+        }
+
+        binding.btnEpisodePlayDownload.visibility = when {
+            isDownloaded -> View.VISIBLE
+            else -> View.GONE
+        }
+
+        val wasVisible = binding.pbEpisodeDownloadProgress.visibility == View.VISIBLE
+        binding.pbEpisodeDownloadProgress.visibility = when {
+            existingDownload?.status == Download.DownloadStatus.DOWNLOADING -> View.VISIBLE
+            existingDownload?.status == Download.DownloadStatus.QUEUED -> View.VISIBLE
+            else -> View.GONE
+        }
+
+        if (!wasVisible && binding.pbEpisodeDownloadProgress.visibility == View.VISIBLE) {
+            binding.pbEpisodeDownloadProgress.invalidate()
+            binding.pbEpisodeDownloadProgress.isIndeterminate = false
+            binding.pbEpisodeDownloadProgress.isIndeterminate = true
+        }
+    }
+
 
     private fun displayMobileItem(binding: ItemEpisodeMobileBinding) {
         val downloadId = "episode_${episode.id}"
@@ -159,10 +242,13 @@ class EpisodeViewHolder(
             }
         }
 
-        binding.tvEpisodeInfo.text = context.getString(
-            R.string.episode_number,
-            episode.number
-        )
+        binding.tvEpisodeInfo.apply {
+            text = context.getString(R.string.episode_number, episode.number)
+            visibility = when {
+                episode.title.isNullOrBlank() -> View.GONE
+                else -> View.VISIBLE
+            }
+        }
 
         binding.tvEpisodeTitle.text = episode.title ?: context.getString(
             R.string.episode_number,
@@ -212,6 +298,12 @@ class EpisodeViewHolder(
         }
 
         binding.btnEpisodeDownload.setOnClickListener {
+            binding.btnEpisodeDownload.visibility = View.GONE
+            binding.pbEpisodeDownloadProgress.visibility = View.VISIBLE
+            binding.pbEpisodeDownloadProgress.isIndeterminate = false
+            binding.pbEpisodeDownloadProgress.isIndeterminate = true
+            binding.btnEpisodeCancelDownload.visibility = View.VISIBLE
+            binding.btnEpisodePlayDownload.visibility = View.GONE
             startDownload(episode)
         }
 
@@ -381,10 +473,13 @@ class EpisodeViewHolder(
             }
         }
 
-        binding.tvEpisodeInfo.text = context.getString(
-            R.string.episode_number,
-            episode.number
-        )
+        binding.tvEpisodeInfo.apply {
+            text = context.getString(R.string.episode_number, episode.number)
+            visibility = when {
+                episode.title.isNullOrBlank() -> View.GONE
+                else -> View.VISIBLE
+            }
+        }
 
         binding.tvEpisodeTitle.text = episode.title ?: context.getString(
             R.string.episode_number,
@@ -449,7 +544,15 @@ class EpisodeViewHolder(
 
         binding.actionButtonGroup.setOnClickListener {
             when {
-                binding.btnEpisodeDownload.visibility == View.VISIBLE -> startDownload(episode)
+                binding.btnEpisodeDownload.visibility == View.VISIBLE -> {
+                    binding.btnEpisodeDownload.visibility = View.GONE
+                    binding.pbEpisodeDownloadProgress.visibility = View.VISIBLE
+                    binding.pbEpisodeDownloadProgress.isIndeterminate = false
+                    binding.pbEpisodeDownloadProgress.isIndeterminate = true
+                    binding.btnEpisodeCancelDownload.visibility = View.VISIBLE
+                    binding.btnEpisodePlayDownload.visibility = View.GONE
+                    startDownload(episode)
+                }
                 binding.btnEpisodeCancelDownload.visibility == View.VISIBLE -> {
                     DownloadManager.getInstance(context).cancelDownload(downloadId)
                     database.downloadDao().cancelDownload(downloadId)
@@ -538,12 +641,14 @@ class EpisodeViewHolder(
                 if (existingDownload?.status == Download.DownloadStatus.COMPLETED) {
                     Handler(Looper.getMainLooper()).post {
                         Toast.makeText(context, context.getString(R.string.download_already_completed), Toast.LENGTH_SHORT).show()
+                        updateDownloadState()
                     }
                     return@launch
                 }
                 if (existingDownload?.status == Download.DownloadStatus.DOWNLOADING || existingDownload?.status == Download.DownloadStatus.QUEUED) {
                     Handler(Looper.getMainLooper()).post {
                         Toast.makeText(context, context.getString(R.string.download_already_in_progress), Toast.LENGTH_SHORT).show()
+                        updateDownloadState()
                     }
                     return@launch
                 }
@@ -575,6 +680,7 @@ class EpisodeViewHolder(
                 if (servers.isEmpty()) {
                     Handler(Looper.getMainLooper()).post {
                         Toast.makeText(context, context.getString(R.string.download_no_servers), Toast.LENGTH_SHORT).show()
+                        updateDownloadState()
                     }
                     return@launch
                 }
@@ -631,6 +737,7 @@ class EpisodeViewHolder(
             } catch (e: Exception) {
                 Handler(Looper.getMainLooper()).post {
                     Toast.makeText(context, context.getString(R.string.download_failed, episode.title ?: "Episode ${episode.number}", e.message), Toast.LENGTH_LONG).show()
+                    updateDownloadState()
                 }
             }
         }

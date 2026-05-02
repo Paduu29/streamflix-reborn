@@ -558,4 +558,6 @@
     <string name="settings_download_quality_high">Alta</string>
     <string name="settings_download_quality_medium">Media</string>
     <string name="settings_download_quality_low">Baja</string>
+    <string name="settings_screen_download_title">Configuración de descargas</string>
+    <string name="settings_screen_download_summary">Calidad y preferencias para contenido sin conexión</string>
 </resources>

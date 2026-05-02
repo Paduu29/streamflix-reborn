@@ -547,4 +547,6 @@
     <string name="settings_download_quality_high">Hoch</string>
     <string name="settings_download_quality_medium">Mittel</string>
     <string name="settings_download_quality_low">Niedrig</string>
+    <string name="settings_screen_download_title">Download-Einstellungen</string>
+    <string name="settings_screen_download_summary">Qualität und Einstellungen für Offline-Inhalte</string>
 </resources>

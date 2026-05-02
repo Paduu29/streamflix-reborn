@@ -14,6 +14,11 @@
         <item name="android:textSize">11sp</item>
     </style>
 
+    <style name="TabLabelStyle" parent="TextAppearance.Design.Tab">
+        <item name="android:maxLines">1</item>
+        <item name="android:hyphenationFrequency">none</item>
+    </style>
+
     <!-- Tema Nero Amoled/Oled per Mobile -->
     <style name="AppTheme.Mobile.NeroAmoledOled" parent="AppTheme.Mobile">
         <item name="app_background_color">#000000</item>

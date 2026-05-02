@@ -180,10 +180,7 @@ class DownloadsMobileFragment : Fragment() {
                 for ((id, newProgress) in adapterProgress) {
                     val oldProgress = lastProgressMap[id]
                     if (newProgress != oldProgress) {
-                        val position = adapter.indexOfDownload(id)
-                        if (position >= 0) {
-                            adapter.notifyItemChanged(position, Any())
-                        }
+                        adapter.updateDownloadProgress(id, newProgress)
                     }
                 }
 
