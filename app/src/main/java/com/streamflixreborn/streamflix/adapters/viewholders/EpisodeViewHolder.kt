@@ -34,12 +34,14 @@ import com.streamflixreborn.streamflix.database.AppDatabase
 import com.streamflixreborn.streamflix.utils.DownloadManager
 import com.streamflixreborn.streamflix.models.Download
 import com.streamflixreborn.streamflix.providers.Provider
+import com.streamflixreborn.streamflix.services.DownloadService
 import androidx.core.content.ContextCompat
 import androidx.lifecycle.findViewTreeLifecycleOwner
 import androidx.lifecycle.lifecycleScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
+import androidx.appcompat.app.AlertDialog
 import android.os.Handler
 import android.os.Looper
 import android.widget.Toast
@@ -685,55 +687,80 @@ class EpisodeViewHolder(
                     return@launch
                 }
 
-                val video = provider.getVideo(servers.first())
-                val tvShowId = episode.tvShow?.id ?: "unknown"
-                val tvShowTitle = episode.tvShow?.title ?: ""
-                val outputDir = downloadManager.getEpisodeDir(tvShowId, seasonNumber, episode.number)
-                val downloadEntry = Download(
-                    id = downloadId,
-                    contentType = Download.ContentType.EPISODE,
-                    title = episode.title ?: "Episode ${episode.number}",
-                    subtitle = "S${seasonNumber} E${episode.number}",
-                    poster = episode.poster,
-                    banner = episode.tvShow?.banner,
-                    videoUrl = video.source,
-                    headers = video.headers ?: emptyMap(),
-                    mimeType = video.type,
-                    status = Download.DownloadStatus.DOWNLOADING,
-                    tvShowId = tvShowId,
-                    tvShowTitle = tvShowTitle,
-                    seasonNumber = seasonNumber,
-                    episodeNumber = episode.number,
-                )
-                database.downloadDao().insert(downloadEntry)
+                 // Show server selection dialog
+                withContext(Dispatchers.Main) {
+                    val serverNames = servers.map { it.name }.toTypedArray()
+                    AlertDialog.Builder(context)
+                        .setTitle("Select Server")
+                        .setItems(serverNames) { _, which ->
+                            val selectedServer = servers[which]
+                            // Continue with download using selected server - use DownloadManager's scope to survive app closure
+                            downloadManager.scope.launch {
+                                try {
+                                    val video = provider.getVideo(selectedServer)
+                                    val tvShowId = episode.tvShow?.id ?: "unknown"
+                                    val tvShowTitle = episode.tvShow?.title ?: ""
+                                    val outputDir = downloadManager.getEpisodeDir(tvShowId, seasonNumber, episode.number)
+                                    val downloadEntry = Download(
+                                        id = downloadId,
+                                        contentType = Download.ContentType.EPISODE,
+                                        title = episode.title ?: "Episode ${episode.number}",
+                                        subtitle = "S${seasonNumber} E${episode.number}",
+                                        poster = episode.poster,
+                                        banner = episode.tvShow?.banner,
+                                        videoUrl = video.source,
+                                        headers = video.headers ?: emptyMap(),
+                                        mimeType = video.type,
+                                        status = Download.DownloadStatus.DOWNLOADING,
+                                        tvShowId = tvShowId,
+                                        tvShowTitle = tvShowTitle,
+                                        seasonNumber = seasonNumber,
+                                        episodeNumber = episode.number,
+                                    )
+                                    database.downloadDao().insert(downloadEntry)
 
-                Handler(Looper.getMainLooper()).post {
-                    Toast.makeText(context, context.getString(R.string.download_starting, episode.title ?: "Episode ${episode.number}"), Toast.LENGTH_LONG).show()
+                                    DownloadService.startService(context)
+
+                                    Handler(Looper.getMainLooper()).post {
+                                        Toast.makeText(context, context.getString(R.string.download_starting, episode.title ?: "Episode ${episode.number}"), Toast.LENGTH_LONG).show()
+                                    }
+
+                                    downloadManager.downloadVideo(
+                                        downloadId = downloadId,
+                                        url = video.source,
+                                        headers = video.headers ?: emptyMap(),
+                                        outputDir = outputDir,
+                                        onProgress = { downloaded, total ->
+                                            val progress = if (total > 0) ((downloaded.toFloat() / total) * 100).toInt() else 0
+                                            database.downloadDao().updateProgress(downloadId, Download.DownloadStatus.DOWNLOADING, progress, downloaded)
+                                        },
+                                        onComplete = { file ->
+                                            database.downloadDao().markAsCompleted(downloadId, Download.DownloadStatus.COMPLETED, file.absolutePath, System.currentTimeMillis())
+                                            database.episodeDao().markAsDownloaded(episode.id, file.absolutePath)
+                                            Handler(Looper.getMainLooper()).post {
+                                                Toast.makeText(context, context.getString(R.string.download_completed, episode.title ?: "Episode ${episode.number}"), Toast.LENGTH_SHORT).show()
+                                            }
+                                        },
+                                        onError = { error ->
+                                            database.downloadDao().markAsFailed(downloadId, Download.DownloadStatus.FAILED, error.message)
+                                            Handler(Looper.getMainLooper()).post {
+                                                Toast.makeText(context, context.getString(R.string.download_failed, episode.title ?: "Episode ${episode.number}", error.message), Toast.LENGTH_LONG).show()
+                                            }
+                                        },
+                                    )
+                                } catch (e: Exception) {
+                                    Handler(Looper.getMainLooper()).post {
+                                        Toast.makeText(context, context.getString(R.string.download_failed, episode.title ?: "Episode ${episode.number}", e.message), Toast.LENGTH_LONG).show()
+                                        updateDownloadState()
+                                    }
+                                }
+                            }
+                        }
+                        .setOnCancelListener {
+                            updateDownloadState()
+                        }
+                        .show()
                 }
-
-                downloadManager.downloadVideo(
-                    downloadId = downloadId,
-                    url = video.source,
-                    headers = video.headers ?: emptyMap(),
-                    outputDir = outputDir,
-                    onProgress = { downloaded, total ->
-                        val progress = if (total > 0) ((downloaded.toFloat() / total) * 100).toInt() else 0
-                        database.downloadDao().updateProgress(downloadId, Download.DownloadStatus.DOWNLOADING, progress, downloaded)
-                    },
-                    onComplete = { file ->
-                        database.downloadDao().markAsCompleted(downloadId, Download.DownloadStatus.COMPLETED, file.absolutePath, System.currentTimeMillis())
-                        database.episodeDao().markAsDownloaded(episode.id, file.absolutePath)
-                        Handler(Looper.getMainLooper()).post {
-                            Toast.makeText(context, context.getString(R.string.download_completed, episode.title ?: "Episode ${episode.number}"), Toast.LENGTH_SHORT).show()
-                        }
-                    },
-                    onError = { error ->
-                        database.downloadDao().markAsFailed(downloadId, Download.DownloadStatus.FAILED, error.message)
-                        Handler(Looper.getMainLooper()).post {
-                            Toast.makeText(context, context.getString(R.string.download_failed, episode.title ?: "Episode ${episode.number}", error.message), Toast.LENGTH_LONG).show()
-                        }
-                    },
-                )
             } catch (e: Exception) {
                 Handler(Looper.getMainLooper()).post {
                     Toast.makeText(context, context.getString(R.string.download_failed, episode.title ?: "Episode ${episode.number}", e.message), Toast.LENGTH_LONG).show()

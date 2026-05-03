@@ -41,7 +41,7 @@ class DownloadManager private constructor(private val context: Context) {
         .followSslRedirects(true)
         .build()
 
-    private val scope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
+    internal val scope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
 
     private val _downloadProgress = MutableStateFlow<Map<String, DownloadProgressInfo>>(emptyMap())
     val downloadProgress: StateFlow<Map<String, DownloadProgressInfo>> = _downloadProgress.asStateFlow()
@@ -454,25 +454,11 @@ class DownloadManager private constructor(private val context: Context) {
         if (isCancelled) {
             outputFile.delete()
             scope.launch {
-                _downloadProgress.value = _downloadProgress.value + mapOf(
-                    downloadId to DownloadProgressInfo(
-                        downloadedBytes = 0,
-                        totalBytes = 0,
-                        progress = 0,
-                        status = DownloadStatus.CANCELLED,
-                    )
-                )
+                _downloadProgress.value = _downloadProgress.value.toMutableMap().apply { remove(downloadId) }
             }
         } else {
             scope.launch {
-                _downloadProgress.value = _downloadProgress.value + mapOf(
-                    downloadId to DownloadProgressInfo(
-                        downloadedBytes = outputFile.length(),
-                        totalBytes = outputFile.length(),
-                        progress = 100,
-                        status = DownloadStatus.COMPLETED,
-                    )
-                )
+                _downloadProgress.value = _downloadProgress.value.toMutableMap().apply { remove(downloadId) }
                 onComplete(outputFile)
             }
         }
@@ -480,6 +466,9 @@ class DownloadManager private constructor(private val context: Context) {
 
     fun cancelDownload(downloadId: String) {
         activeDownloads[downloadId] = false
+        scope.launch {
+            _downloadProgress.value = _downloadProgress.value.toMutableMap().apply { remove(downloadId) }
+        }
     }
 
     fun deleteDownload(downloadId: String, videoDir: File) {

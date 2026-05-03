@@ -23,6 +23,7 @@ import com.streamflixreborn.streamflix.models.Video
 import com.streamflixreborn.streamflix.ui.SpacingItemDecoration
 import com.streamflixreborn.streamflix.utils.CacheUtils
 import com.streamflixreborn.streamflix.utils.DownloadManager
+import com.streamflixreborn.streamflix.services.DownloadService
 import com.streamflixreborn.streamflix.utils.LoggingUtils
 import com.streamflixreborn.streamflix.utils.UserPreferences
 import com.streamflixreborn.streamflix.utils.dp
@@ -205,7 +206,7 @@ class SeasonMobileFragment : Fragment() {
         val seasonNumber = args.seasonNumber
         val tvShowTitle = args.tvShowTitle
 
-        viewLifecycleOwner.lifecycleScope.launch(Dispatchers.IO) {
+        downloadManager.scope.launch(Dispatchers.IO) {
             var queuedCount = 0
             var skippedCount = 0
             var failedCount = 0
@@ -266,6 +267,8 @@ class SeasonMobileFragment : Fragment() {
                         episodeNumber = episode.number,
                     )
                     database.downloadDao().insert(downloadEntry)
+
+                    DownloadService.startService(requireContext())
 
                     downloadManager.downloadVideo(
                         downloadId = downloadId,

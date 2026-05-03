@@ -49,6 +49,24 @@ import com.streamflixreborn.streamflix.fragments.movie.MovieMobileFragment
 import com.streamflixreborn.streamflix.fragments.movie.MovieMobileFragmentDirections
 import com.streamflixreborn.streamflix.fragments.movie.MovieTvFragment
 import com.streamflixreborn.streamflix.fragments.movie.MovieTvFragmentDirections
+import com.streamflixreborn.streamflix.providers.Provider
+import com.streamflixreborn.streamflix.services.DownloadService
+import com.streamflixreborn.streamflix.ui.ShowOptionsMobileDialog
+import com.streamflixreborn.streamflix.ui.ShowOptionsTvDialog
+import com.streamflixreborn.streamflix.ui.SpacingItemDecoration
+import com.streamflixreborn.streamflix.utils.dp
+import com.streamflixreborn.streamflix.utils.format
+import com.streamflixreborn.streamflix.utils.getCurrentFragment
+import com.streamflixreborn.streamflix.utils.loadMovieBanner
+import com.streamflixreborn.streamflix.utils.loadMoviePoster
+import com.streamflixreborn.streamflix.utils.ArtworkRepair
+import com.streamflixreborn.streamflix.utils.toActivity
+import java.util.Locale
+import com.streamflixreborn.streamflix.utils.DownloadManager
+import com.streamflixreborn.streamflix.models.Download
+import com.streamflixreborn.streamflix.utils.UserPreferences
+import com.streamflixreborn.streamflix.databinding.ContentMovieDirectorsMobileBinding
+import com.streamflixreborn.streamflix.databinding.ContentMovieDirectorsTvBinding
 import com.streamflixreborn.streamflix.fragments.movies.MoviesMobileFragment
 import com.streamflixreborn.streamflix.fragments.movies.MoviesMobileFragmentDirections
 import com.streamflixreborn.streamflix.fragments.movies.MoviesTvFragment
@@ -65,30 +83,9 @@ import com.streamflixreborn.streamflix.fragments.tv_show.TvShowMobileFragment
 import com.streamflixreborn.streamflix.fragments.tv_show.TvShowMobileFragmentDirections
 import com.streamflixreborn.streamflix.fragments.tv_show.TvShowTvFragment
 import com.streamflixreborn.streamflix.fragments.tv_show.TvShowTvFragmentDirections
-import com.streamflixreborn.streamflix.fragments.tv_shows.TvShowsTvFragment
-import com.streamflixreborn.streamflix.fragments.tv_shows.TvShowsTvFragmentDirections
 import com.streamflixreborn.streamflix.models.Movie
 import com.streamflixreborn.streamflix.models.TvShow
 import com.streamflixreborn.streamflix.models.Video
-import com.streamflixreborn.streamflix.ui.ShowOptionsMobileDialog
-import com.streamflixreborn.streamflix.ui.ShowOptionsTvDialog
-import com.streamflixreborn.streamflix.ui.SpacingItemDecoration
-import com.streamflixreborn.streamflix.utils.dp
-import androidx.preference.Preference
-import com.streamflixreborn.streamflix.utils.format
-import com.streamflixreborn.streamflix.utils.getCurrentFragment
-import com.streamflixreborn.streamflix.utils.loadMovieBanner
-import com.streamflixreborn.streamflix.utils.loadMoviePoster
-import com.streamflixreborn.streamflix.utils.ArtworkRepair
-import com.streamflixreborn.streamflix.utils.toActivity
-import java.util.Locale
-import com.streamflixreborn.streamflix.utils.DownloadManager
-import com.streamflixreborn.streamflix.models.Download
-import com.streamflixreborn.streamflix.providers.Provider
-import com.streamflixreborn.streamflix.utils.UserPreferences
-import android.view.KeyEvent
-import com.streamflixreborn.streamflix.databinding.ContentMovieDirectorsMobileBinding
-import com.streamflixreborn.streamflix.databinding.ContentMovieDirectorsTvBinding
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
@@ -771,7 +768,7 @@ class MovieViewHolder(
                     val downloadManager = DownloadManager.getInstance(context)
                     val downloadId = "movie_${movie.id}"
 
-                    itemView.findViewTreeLifecycleOwner()?.lifecycleScope?.launch(Dispatchers.IO) {
+                    downloadManager.scope.launch(Dispatchers.IO) {
                         try {
                             val existingDownload = database.downloadDao().getDownloadById(downloadId)
                             if (existingDownload?.status == Download.DownloadStatus.COMPLETED) {
@@ -820,6 +817,8 @@ class MovieViewHolder(
                                 status = Download.DownloadStatus.DOWNLOADING,
                             )
                             database.downloadDao().insert(downloadEntry)
+
+                            DownloadService.startService(context)
 
                             Handler(Looper.getMainLooper()).post {
                                 Toast.makeText(context, context.getString(R.string.download_starting, movie.title), Toast.LENGTH_LONG).show()
@@ -998,7 +997,7 @@ class MovieViewHolder(
                     val downloadManager = DownloadManager.getInstance(context)
                     val downloadId = "movie_${movie.id}"
 
-                    itemView.findViewTreeLifecycleOwner()?.lifecycleScope?.launch(Dispatchers.IO) {
+                    downloadManager.scope.launch(Dispatchers.IO) {
                         try {
                             val existingDownload = database.downloadDao().getDownloadById(downloadId)
                             if (existingDownload?.status == Download.DownloadStatus.COMPLETED) {
@@ -1047,6 +1046,8 @@ class MovieViewHolder(
                                 status = Download.DownloadStatus.DOWNLOADING,
                             )
                             database.downloadDao().insert(downloadEntry)
+
+                            DownloadService.startService(context)
 
                             Handler(Looper.getMainLooper()).post {
                                 Toast.makeText(context, context.getString(R.string.download_starting, movie.title), Toast.LENGTH_LONG).show()
