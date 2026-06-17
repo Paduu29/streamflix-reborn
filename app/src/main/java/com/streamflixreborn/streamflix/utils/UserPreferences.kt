@@ -439,6 +439,24 @@ object UserPreferences {
             Key.FAVORITE_PROVIDERS.setStringSet(value)
         }
 
+    var lanSyncEnabled: Boolean
+        get() = Key.LAN_SYNC_ENABLED.getBoolean() ?: false
+        set(value) = Key.LAN_SYNC_ENABLED.setBoolean(value)
+
+    var syncDeviceName: String
+        get() = Key.SYNC_DEVICE_NAME.getString() ?: ""
+        set(value) = Key.SYNC_DEVICE_NAME.setString(value)
+
+    var syncPeers: Set<String>
+        get() = Key.SYNC_PEERS.getStringSet() ?: emptySet()
+        set(value) = Key.SYNC_PEERS.setStringSet(value)
+
+    var lastSyncTimestamp: Long
+        get() = Key.LAST_SYNC_TIMESTAMP.getLong() ?: 0L
+        set(value) = Key.LAST_SYNC_TIMESTAMP.setLong(value)
+
+
+
     private enum class Key {
         APP_LAYOUT,
         CURRENT_LANGUAGE,
@@ -481,7 +499,11 @@ object UserPreferences {
         BYPASS_WS_ADVERTISED_HOST,
         UPDATE_CHECK_ENABLED,
         PROVIDER_LANGUAGE,
-        FAVORITE_PROVIDERS;
+        FAVORITE_PROVIDERS,
+        LAN_SYNC_ENABLED,
+        SYNC_DEVICE_NAME,
+        SYNC_PEERS,
+        LAST_SYNC_TIMESTAMP;
 
         fun getStringSet(): Set<String>? = when {
             prefs.contains(name) -> prefs.getStringSet(name, null)

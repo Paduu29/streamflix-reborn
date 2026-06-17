@@ -8,6 +8,8 @@ import org.conscrypt.Conscrypt
 import com.streamflixreborn.streamflix.database.AppDatabase
 import com.streamflixreborn.streamflix.providers.AniWorldProvider
 import com.streamflixreborn.streamflix.providers.SerienStreamProvider
+import com.streamflixreborn.streamflix.sync.LanSyncManager
+import com.streamflixreborn.streamflix.ui.UserDataNotifier
 import com.streamflixreborn.streamflix.utils.AppLanguageManager
 import com.streamflixreborn.streamflix.utils.ArtworkRepairScheduler
 import com.streamflixreborn.streamflix.utils.CacheUtils
@@ -56,6 +58,21 @@ class StreamFlixApp : Application() {
             AniWorldProvider.initialize(appContext)
             ArtworkRepairScheduler.schedule(appContext, UserPreferences.currentProvider)
             CacheUtils.autoClearIfNeeded(appContext, thresholdMb = threshold)
+
+            // 3. LAN Sync
+            val lanSyncManager = LanSyncManager(appContext)
+            if (UserPreferences.lanSyncEnabled) {
+                lanSyncManager.respondToDiscovery()
+                lanSyncManager.startServer()
+                lanSyncManager.pullFromAllPeers()
+            }
+
+            // 4. Watch for data changes and push to LAN peers
+            UserDataNotifier.updates.collect {
+                if (UserPreferences.lanSyncEnabled && lanSyncManager.isRunning()) {
+                    lanSyncManager.pushToAllPeers()
+                }
+            }
         }
     }
 

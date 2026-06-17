@@ -506,4 +506,32 @@
     <string name="settings_parental_tmdb_disable_blocked">You must unlock parental controls before disabling TMDb.</string>
     <string name="settings_force_extra_buffer_title">Global Extra Buffering</string>
     <string name="settings_force_extra_buffer_summary">Enable extra buffering for all servers by default</string>
+
+    <string name="lan_sync_title">LAN Sync</string>
+    <string name="lan_sync_screen_title">LAN Sync</string>
+    <string name="lan_sync_screen_summary">Sync watch progress across devices on your local network</string>
+    <string name="lan_sync_enable_title">Enable LAN Sync</string>
+    <string name="lan_sync_enable_summary">Automatically sync watch progress with other Streamflix devices on your network</string>
+    <string name="lan_sync_device_name_title">Device name</string>
+    <string name="lan_sync_device_name_summary">Name shown to other devices on the network</string>
+    <string name="lan_sync_device_ip_title">My IP</string>
+    <string name="lan_sync_device_ip_summary">%1$s</string>
+    <string name="lan_sync_discover_title">Discover devices</string>
+    <string name="lan_sync_discover_summary">Find other Streamflix devices on your network</string>
+    <string name="lan_sync_discovering">Discovering…</string>
+    <string name="lan_sync_discovered_none">No devices found. Make sure LAN Sync is enabled on other devices.</string>
+    <string name="lan_sync_peers_title">Connected devices</string>
+    <string name="lan_sync_peers_empty">No devices added yet</string>
+    <string name="lan_sync_add_peer_title">Add device manually</string>
+    <string name="lan_sync_add_peer_summary">Enter the IP address of another Streamflix device</string>
+    <string name="lan_sync_add_peer_dialog_title">Enter IP address</string>
+    <string name="lan_sync_remove_peer_title">Remove %1$s</string>
+    <string name="lan_sync_remove_peer_confirm">Remove this device?</string>
+    <string name="lan_sync_sync_now_title">Sync now</string>
+    <string name="lan_sync_sync_now_summary">Manually pull latest data from connected devices</string>
+    <string name="lan_sync_syncing">Syncing…</string>
+    <string name="lan_sync_sync_success">Sync completed successfully</string>
+    <string name="lan_sync_sync_failed">Sync failed. Check that devices are online.</string>
+    <string name="lan_sync_server_status">Server: Running on %1$s</string>
+    <string name="lan_sync_server_stopped">Server not running</string>
 </resources>

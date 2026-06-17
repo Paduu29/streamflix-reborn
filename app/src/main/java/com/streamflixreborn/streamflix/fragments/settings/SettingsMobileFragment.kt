@@ -33,6 +33,7 @@ import com.streamflixreborn.streamflix.activities.main.MainMobileActivity
 import com.streamflixreborn.streamflix.activities.tools.QrScannerActivity
 import com.streamflixreborn.streamflix.backup.BackupRestoreManager
 import com.streamflixreborn.streamflix.backup.ProviderBackupContext
+import com.streamflixreborn.streamflix.sync.LanSyncManager
 import com.streamflixreborn.streamflix.database.AppDatabase
 import com.streamflixreborn.streamflix.providers.FrenchStreamProvider
 import com.streamflixreborn.streamflix.providers.Provider
@@ -69,6 +70,7 @@ class SettingsMobileFragment : PreferenceFragmentCompat() {
     private lateinit var settingsBackCallback: OnBackPressedCallback
 
     private lateinit var backupRestoreManager: BackupRestoreManager
+    private lateinit var lanSyncManager: LanSyncManager
     private var backupLoadingDialog: AlertDialog? = null
 
     private val exportBackupLauncher = registerForActivityResult(
@@ -169,6 +171,10 @@ class SettingsMobileFragment : PreferenceFragmentCompat() {
                 }
             }
         )
+
+        lanSyncManager = LanSyncManager(requireContext())
+        lanSyncManager.respondToDiscovery()
+        lanSyncManager.startServer()
 
         displaySettings()
     }
@@ -750,6 +756,8 @@ class SettingsMobileFragment : PreferenceFragmentCompat() {
             importDbBackupLauncher.launch(arrayOf("application/zip"))
             true
         }
+
+        setupLanSyncSettings()
     }
 
     private fun updateOverviewLabels() {
@@ -1365,4 +1373,150 @@ class SettingsMobileFragment : PreferenceFragmentCompat() {
         findPreference<SwitchPreferenceCompat>("ENABLE_TMDB")?.isChecked = UserPreferences.enableTmdb
         updateParentalControlPreferenceState()
     }
+
+    private fun setupLanSyncSettings() {
+        val isLanSyncScreen = currentScreenState.rootKey == "screen_lan_sync"
+
+        findPreference<SwitchPreference>("lan_sync_enabled")?.apply {
+            isChecked = UserPreferences.lanSyncEnabled
+            setOnPreferenceChangeListener { _, newValue ->
+                val enabled = newValue as Boolean
+                UserPreferences.lanSyncEnabled = enabled
+                if (enabled) {
+                    lanSyncManager.startServer()
+                    lanSyncManager.respondToDiscovery()
+                    viewLifecycleOwner.lifecycleScope.launch {
+                        lanSyncManager.pullFromAllPeers()
+                    }
+                } else {
+                    lanSyncManager.stopServer()
+                }
+                updateLanSyncStatus()
+                true
+            }
+        }
+
+        findPreference<EditTextPreference>("lan_sync_device_name")?.apply {
+            summary = LanSyncManager.getDeviceName()
+            text = UserPreferences.syncDeviceName.ifBlank { null }
+            setOnPreferenceChangeListener { _, newValue ->
+                val name = (newValue as String).trim()
+                UserPreferences.syncDeviceName = name
+                summary = name.ifBlank { LanSyncManager.getDeviceName() }
+                true
+            }
+        }
+
+        if (isLanSyncScreen) {
+            updateLanSyncStatus()
+        }
+
+        findPreference<Preference>("lan_sync_discover")?.setOnPreferenceClickListener {
+            viewLifecycleOwner.lifecycleScope.launch {
+                val pref = findPreference<Preference>("lan_sync_discover")
+                pref?.summary = getString(R.string.lan_sync_discovering)
+                val found = withContext(Dispatchers.IO) {
+                    lanSyncManager.discoverPeers()
+                }
+                val knownPeers = UserPreferences.syncPeers.toMutableList()
+                found.forEach { ip ->
+                    if (ip !in knownPeers) knownPeers.add(ip)
+                }
+                UserPreferences.syncPeers = knownPeers.toSet()
+                pref?.summary = if (found.isEmpty()) {
+                    getString(R.string.lan_sync_discovered_none)
+                } else {
+                    getString(R.string.lan_sync_add_peer_summary)
+                }
+                updateLanSyncStatus()
+            }
+            true
+        }
+
+        findPreference<Preference>("lan_sync_add_peer")?.setOnPreferenceClickListener {
+            val input = android.widget.EditText(requireContext()).apply {
+                inputType = android.text.InputType.TYPE_CLASS_PHONE
+                hint = "192.168.1.100"
+            }
+            AlertDialog.Builder(requireContext())
+                .setTitle(getString(R.string.lan_sync_add_peer_dialog_title))
+                .setView(input)
+                .setPositiveButton(android.R.string.ok) { _, _ ->
+                    val ip = input.text.toString().trim()
+                    if (ip.isNotBlank()) {
+                        val peers = UserPreferences.syncPeers.toMutableList()
+                        if (ip !in peers) {
+                            peers.add(ip)
+                            UserPreferences.syncPeers = peers.toSet()
+                            updateLanSyncStatus()
+                        }
+                    }
+                }
+                .setNegativeButton(android.R.string.cancel, null)
+                .show()
+            true
+        }
+
+        findPreference<Preference>("lan_sync_peers")?.setOnPreferenceClickListener {
+            val peers = UserPreferences.syncPeers.toList()
+            if (peers.isEmpty()) {
+                Toast.makeText(requireContext(), R.string.lan_sync_peers_empty, Toast.LENGTH_SHORT).show()
+                return@setOnPreferenceClickListener true
+            }
+            AlertDialog.Builder(requireContext())
+                .setTitle(getString(R.string.lan_sync_peers_title))
+                .setItems(peers.toTypedArray()) { _, which ->
+                    val ip = peers[which]
+                    AlertDialog.Builder(requireContext())
+                        .setTitle(getString(R.string.lan_sync_remove_peer_title, ip))
+                        .setMessage(getString(R.string.lan_sync_remove_peer_confirm))
+                        .setPositiveButton(android.R.string.ok) { _, _ ->
+                            val updated = UserPreferences.syncPeers.toMutableList()
+                            updated.remove(ip)
+                            UserPreferences.syncPeers = updated.toSet()
+                            updateLanSyncStatus()
+                        }
+                        .setNegativeButton(android.R.string.cancel, null)
+                        .show()
+                }
+                .show()
+            true
+        }
+
+        findPreference<Preference>("lan_sync_sync_now")?.setOnPreferenceClickListener {
+            viewLifecycleOwner.lifecycleScope.launch {
+                val pref = it
+                pref.summary = getString(R.string.lan_sync_syncing)
+                val success = lanSyncManager.pullFromAllPeers()
+                pref.summary = if (success) {
+                    Toast.makeText(requireContext(), R.string.lan_sync_sync_success, Toast.LENGTH_SHORT).show()
+                    getString(R.string.lan_sync_sync_now_summary)
+                } else {
+                    Toast.makeText(requireContext(), R.string.lan_sync_sync_failed, Toast.LENGTH_SHORT).show()
+                    getString(R.string.lan_sync_sync_now_summary)
+                }
+            }
+            true
+        }
+    }
+
+    private fun updateLanSyncStatus() {
+        val ip = lanSyncManager.getLocalIpForDisplay()
+        findPreference<Preference>("lan_sync_device_ip")?.summary = ip
+
+        val peers = UserPreferences.syncPeers
+        findPreference<Preference>("lan_sync_peers")?.summary = if (peers.isEmpty()) {
+            getString(R.string.lan_sync_peers_empty)
+        } else {
+            peers.joinToString(", ")
+        }
+
+        val statusPref = findPreference<Preference>("lan_sync_enabled")
+        if (lanSyncManager.isRunning()) {
+            statusPref?.summary = getString(R.string.lan_sync_server_status, ip)
+        } else {
+            statusPref?.summary = getString(R.string.lan_sync_server_stopped)
+        }
+    }
+
 }

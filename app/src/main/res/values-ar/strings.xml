@@ -497,4 +497,32 @@
     <string name="settings_refresh_cache_confirm">تحديث ذاكرة التخزين المؤقت؟</string>
     <string name="settings_refresh_cache_message">سيؤدي ذلك إلى إعادة تحميل سجل المشاهدة وبيانات التطبيق من قاعدة البيانات.</string>
     <string name="settings_refresh_cache_success">تم تحديث ذاكرة التخزين المؤقت بنجاح</string>
+
+    <string name="lan_sync_title">مزامنة LAN</string>
+    <string name="lan_sync_screen_title">مزامنة LAN</string>
+    <string name="lan_sync_screen_summary">مزامنة تقدم المشاهدة عبر الأجهزة على شبكتك المحلية</string>
+    <string name="lan_sync_enable_title">تفعيل مزامنة LAN</string>
+    <string name="lan_sync_enable_summary">مزامنة تقدم المشاهدة تلقائياً مع أجهزة Streamflix الأخرى على شبكتك</string>
+    <string name="lan_sync_device_name_title">اسم الجهاز</string>
+    <string name="lan_sync_device_name_summary">الاسم الذي يظهر للأجهزة الأخرى على الشبكة</string>
+    <string name="lan_sync_device_ip_title">IP الخاص بي</string>
+    <string name="lan_sync_device_ip_summary">%1$s</string>
+    <string name="lan_sync_discover_title">اكتشاف الأجهزة</string>
+    <string name="lan_sync_discover_summary">العثور على أجهزة Streamflix الأخرى على شبكتك</string>
+    <string name="lan_sync_discovering">جارٍ الاكتشاف…</string>
+    <string name="lan_sync_discovered_none">لم يتم العثور على أجهزة. تأكد من تفعيل مزامنة LAN على الأجهزة الأخرى.</string>
+    <string name="lan_sync_peers_title">الأجهزة المتصلة</string>
+    <string name="lan_sync_peers_empty">لم تتم إضافة أجهزة بعد</string>
+    <string name="lan_sync_add_peer_title">إضافة جهاز يدوياً</string>
+    <string name="lan_sync_add_peer_summary">أدخل عنوان IP لجهاز Streamflix آخر</string>
+    <string name="lan_sync_add_peer_dialog_title">أدخل عنوان IP</string>
+    <string name="lan_sync_remove_peer_title">إزالة %1$s</string>
+    <string name="lan_sync_remove_peer_confirm">إزالة هذا الجهاز؟</string>
+    <string name="lan_sync_sync_now_title">مزامنة الآن</string>
+    <string name="lan_sync_sync_now_summary">سحب أحدث البيانات يدوياً من الأجهزة المتصلة</string>
+    <string name="lan_sync_syncing">جارٍ المزامنة…</string>
+    <string name="lan_sync_sync_success">تمت المزامنة بنجاح</string>
+    <string name="lan_sync_sync_failed">فشلت المزامنة. تحقق من أن الأجهزة متصلة بالإنترنت.</string>
+    <string name="lan_sync_server_status">الخادم: يعمل على %1$s</string>
+    <string name="lan_sync_server_stopped">الخادم لا يعمل</string>
 </resources>

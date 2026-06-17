@@ -504,4 +504,32 @@
     <string name="settings_parental_tmdb_disable_blocked">Debes desbloquear el control parental antes de desactivar TMDB.</string>
     <string name="settings_force_extra_buffer_title">Búfer extra global</string>
     <string name="settings_force_extra_buffer_summary">Activa búfer extra para todos los servidores de forma predeterminada</string>
+
+    <string name="lan_sync_title">Sincro. LAN</string>
+    <string name="lan_sync_screen_title">Sincro. LAN</string>
+    <string name="lan_sync_screen_summary">Sincronizar el progreso de reproducción entre dispositivos en tu red local</string>
+    <string name="lan_sync_enable_title">Activar sincro. LAN</string>
+    <string name="lan_sync_enable_summary">Sincronizar automáticamente el progreso con otros dispositivos Streamflix en tu red</string>
+    <string name="lan_sync_device_name_title">Nombre del dispositivo</string>
+    <string name="lan_sync_device_name_summary">Nombre mostrado a otros dispositivos en la red</string>
+    <string name="lan_sync_device_ip_title">Mi IP</string>
+    <string name="lan_sync_device_ip_summary">%1$s</string>
+    <string name="lan_sync_discover_title">Descubrir dispositivos</string>
+    <string name="lan_sync_discover_summary">Encontrar otros dispositivos Streamflix en tu red</string>
+    <string name="lan_sync_discovering">Descubriendo…</string>
+    <string name="lan_sync_discovered_none">No se encontraron dispositivos. Asegúrate de que la sincro. LAN esté activada en otros dispositivos.</string>
+    <string name="lan_sync_peers_title">Dispositivos conectados</string>
+    <string name="lan_sync_peers_empty">Aún no se agregaron dispositivos</string>
+    <string name="lan_sync_add_peer_title">Agregar dispositivo manualmente</string>
+    <string name="lan_sync_add_peer_summary">Ingresar la dirección IP de otro dispositivo Streamflix</string>
+    <string name="lan_sync_add_peer_dialog_title">Ingresar dirección IP</string>
+    <string name="lan_sync_remove_peer_title">Eliminar %1$s</string>
+    <string name="lan_sync_remove_peer_confirm">¿Eliminar este dispositivo?</string>
+    <string name="lan_sync_sync_now_title">Sincronizar ahora</string>
+    <string name="lan_sync_sync_now_summary">Obtener manualmente los últimos datos de los dispositivos conectados</string>
+    <string name="lan_sync_syncing">Sincronizando…</string>
+    <string name="lan_sync_sync_success">Sincronización completada con éxito</string>
+    <string name="lan_sync_sync_failed">Sincronización fallida. Verifica que los dispositivos estén en línea.</string>
+    <string name="lan_sync_server_status">Servidor: ejecutándose en %1$s</string>
+    <string name="lan_sync_server_stopped">Servidor no en ejecución</string>
 </resources>

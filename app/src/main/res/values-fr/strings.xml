@@ -504,4 +504,32 @@
     <string name="settings_refresh_cache_confirm">Actualiser le cache ?</string>
     <string name="settings_refresh_cache_message">Cela rechargera l\'historique de visionnage et les données de l\'application depuis la base de données.</string>
     <string name="settings_refresh_cache_success">Cache actualisé avec succès</string>
+
+    <string name="lan_sync_title">Sync LAN</string>
+    <string name="lan_sync_screen_title">Sync LAN</string>
+    <string name="lan_sync_screen_summary">Synchroniser la progression de lecture entre les appareils sur votre réseau local</string>
+    <string name="lan_sync_enable_title">Activer la synchro LAN</string>
+    <string name="lan_sync_enable_summary">Synchroniser automatiquement la progression avec d\'autres appareils Streamflix sur votre réseau</string>
+    <string name="lan_sync_device_name_title">Nom de l\'appareil</string>
+    <string name="lan_sync_device_name_summary">Nom affiché aux autres appareils sur le réseau</string>
+    <string name="lan_sync_device_ip_title">Mon IP</string>
+    <string name="lan_sync_device_ip_summary">%1$s</string>
+    <string name="lan_sync_discover_title">Découvrir les appareils</string>
+    <string name="lan_sync_discover_summary">Trouver d\'autres appareils Streamflix sur votre réseau</string>
+    <string name="lan_sync_discovering">Découverte…</string>
+    <string name="lan_sync_discovered_none">Aucun appareil trouvé. Assurez-vous que la synchro LAN est activée sur les autres appareils.</string>
+    <string name="lan_sync_peers_title">Appareils connectés</string>
+    <string name="lan_sync_peers_empty">Aucun appareil ajouté</string>
+    <string name="lan_sync_add_peer_title">Ajouter un appareil manuellement</string>
+    <string name="lan_sync_add_peer_summary">Entrer l\'adresse IP d\'un autre appareil Streamflix</string>
+    <string name="lan_sync_add_peer_dialog_title">Entrer l\'adresse IP</string>
+    <string name="lan_sync_remove_peer_title">Supprimer %1$s</string>
+    <string name="lan_sync_remove_peer_confirm">Supprimer cet appareil ?</string>
+    <string name="lan_sync_sync_now_title">Synchroniser maintenant</string>
+    <string name="lan_sync_sync_now_summary">Récupérer manuellement les dernières données des appareils connectés</string>
+    <string name="lan_sync_syncing">Synchronisation…</string>
+    <string name="lan_sync_sync_success">Synchronisation réussie</string>
+    <string name="lan_sync_sync_failed">Échec de la synchro. Vérifiez que les appareils sont en ligne.</string>
+    <string name="lan_sync_server_status">Serveur : en cours sur %1$s</string>
+    <string name="lan_sync_server_stopped">Serveur arrêté</string>
 </resources>

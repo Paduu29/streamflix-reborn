@@ -163,4 +163,32 @@
     <string name="settings_app_language_french">Francuski</string>
     <string name="settings_app_language_italian">Wloski</string>
     <string name="settings_app_language_polish">Polski</string>
+
+    <string name="lan_sync_title">Sync LAN</string>
+    <string name="lan_sync_screen_title">Sync LAN</string>
+    <string name="lan_sync_screen_summary">Synchronizuj postęp oglądania między urządzeniami w sieci lokalnej</string>
+    <string name="lan_sync_enable_title">Włącz sync LAN</string>
+    <string name="lan_sync_enable_summary">Automatycznie synchronizuj postęp oglądania z innymi urządzeniami Streamflix w sieci</string>
+    <string name="lan_sync_device_name_title">Nazwa urządzenia</string>
+    <string name="lan_sync_device_name_summary">Nazwa wyświetlana innym urządzeniom w sieci</string>
+    <string name="lan_sync_device_ip_title">Mój adres IP</string>
+    <string name="lan_sync_device_ip_summary">%1$s</string>
+    <string name="lan_sync_discover_title">Znajdź urządzenia</string>
+    <string name="lan_sync_discover_summary">Znajdź inne urządzenia Streamflix w swojej sieci</string>
+    <string name="lan_sync_discovering">Szukanie…</string>
+    <string name="lan_sync_discovered_none">Nie znaleziono urządzeń. Upewnij się, że sync LAN jest włączony na innych urządzeniach.</string>
+    <string name="lan_sync_peers_title">Podłączone urządzenia</string>
+    <string name="lan_sync_peers_empty">Nie dodano jeszcze żadnych urządzeń</string>
+    <string name="lan_sync_add_peer_title">Dodaj urządzenie ręcznie</string>
+    <string name="lan_sync_add_peer_summary">Wprowadź adres IP innego urządzenia Streamflix</string>
+    <string name="lan_sync_add_peer_dialog_title">Wprowadź adres IP</string>
+    <string name="lan_sync_remove_peer_title">Usuń %1$s</string>
+    <string name="lan_sync_remove_peer_confirm">Usunąć to urządzenie?</string>
+    <string name="lan_sync_sync_now_title">Synchronizuj teraz</string>
+    <string name="lan_sync_sync_now_summary">Ręcznie pobierz najnowsze dane z podłączonych urządzeń</string>
+    <string name="lan_sync_syncing">Synchronizowanie…</string>
+    <string name="lan_sync_sync_success">Synchronizacja zakończona pomyślnie</string>
+    <string name="lan_sync_sync_failed">Synchronizacja nie powiodła się. Sprawdź, czy urządzenia są online.</string>
+    <string name="lan_sync_server_status">Serwer: uruchomiony na %1$s</string>
+    <string name="lan_sync_server_stopped">Serwer nie uruchomiony</string>
 </resources>

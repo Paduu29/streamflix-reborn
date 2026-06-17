@@ -493,4 +493,32 @@
     <string name="settings_refresh_cache_confirm">Cache aktualisieren?</string>
     <string name="settings_refresh_cache_message">Dadurch werden dein Wiedergabeverlauf und die App-Daten aus der Datenbank neu geladen.</string>
     <string name="settings_refresh_cache_success">Cache erfolgreich aktualisiert</string>
+
+    <string name="lan_sync_title">LAN-Sync</string>
+    <string name="lan_sync_screen_title">LAN-Sync</string>
+    <string name="lan_sync_screen_summary">Synchronisiere den Wiedergabestatus zwischen Geräten in deinem lokalen Netzwerk</string>
+    <string name="lan_sync_enable_title">LAN-Sync aktivieren</string>
+    <string name="lan_sync_enable_summary">Automatisch den Wiedergabestatus mit anderen Streamflix-Geräten im Netzwerk synchronisieren</string>
+    <string name="lan_sync_device_name_title">Gerätename</string>
+    <string name="lan_sync_device_name_summary">Name, der anderen Geräten im Netzwerk angezeigt wird</string>
+    <string name="lan_sync_device_ip_title">Meine IP</string>
+    <string name="lan_sync_device_ip_summary">%1$s</string>
+    <string name="lan_sync_discover_title">Geräte suchen</string>
+    <string name="lan_sync_discover_summary">Andere Streamflix-Geräte im Netzwerk finden</string>
+    <string name="lan_sync_discovering">Suche…</string>
+    <string name="lan_sync_discovered_none">Keine Geräte gefunden. Stelle sicher, dass LAN-Sync auf anderen Geräten aktiviert ist.</string>
+    <string name="lan_sync_peers_title">Verbundene Geräte</string>
+    <string name="lan_sync_peers_empty">Noch keine Geräte hinzugefügt</string>
+    <string name="lan_sync_add_peer_title">Gerät manuell hinzufügen</string>
+    <string name="lan_sync_add_peer_summary">IP-Adresse eines anderen Streamflix-Geräts eingeben</string>
+    <string name="lan_sync_add_peer_dialog_title">IP-Adresse eingeben</string>
+    <string name="lan_sync_remove_peer_title">%1$s entfernen</string>
+    <string name="lan_sync_remove_peer_confirm">Dieses Gerät entfernen?</string>
+    <string name="lan_sync_sync_now_title">Jetzt synchronisieren</string>
+    <string name="lan_sync_sync_now_summary">Manuell die neuesten Daten von verbundenen Geräten abrufen</string>
+    <string name="lan_sync_syncing">Synchronisiere…</string>
+    <string name="lan_sync_sync_success">Synchronisierung erfolgreich abgeschlossen</string>
+    <string name="lan_sync_sync_failed">Synchronisierung fehlgeschlagen. Überprüfe, ob die Geräte online sind.</string>
+    <string name="lan_sync_server_status">Server: Läuft auf %1$s</string>
+    <string name="lan_sync_server_stopped">Server läuft nicht</string>
 </resources>

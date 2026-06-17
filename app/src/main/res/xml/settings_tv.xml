@@ -288,6 +288,54 @@
     </PreferenceScreen>
 
     <PreferenceScreen
+        android:key="screen_lan_sync"
+        android:title="@string/lan_sync_title"
+        android:summary="@string/lan_sync_screen_summary"
+        android:widgetLayout="@layout/preference_widget_chevron">
+
+        <PreferenceCategory
+            android:title="@string/lan_sync_title">
+
+            <SwitchPreference
+                android:key="lan_sync_enabled"
+                android:title="@string/lan_sync_enable_title"
+                android:summary="@string/lan_sync_enable_summary"
+                android:defaultValue="false" />
+
+            <EditTextPreference
+                android:key="lan_sync_device_name"
+                android:title="@string/lan_sync_device_name_title"
+                android:summary="@string/lan_sync_device_name_summary"
+                android:inputType="text" />
+
+            <Preference
+                android:key="lan_sync_device_ip"
+                android:title="@string/lan_sync_device_ip_title"
+                android:summary="@string/lan_sync_device_ip_summary" />
+
+            <Preference
+                android:key="lan_sync_discover"
+                android:title="@string/lan_sync_discover_title"
+                android:summary="@string/lan_sync_discover_summary" />
+
+            <Preference
+                android:key="lan_sync_peers"
+                android:title="@string/lan_sync_peers_title"
+                android:summary="@string/lan_sync_peers_empty" />
+
+            <Preference
+                android:key="lan_sync_add_peer"
+                android:title="@string/lan_sync_add_peer_title"
+                android:summary="@string/lan_sync_add_peer_summary" />
+
+            <Preference
+                android:key="lan_sync_sync_now"
+                android:title="@string/lan_sync_sync_now_title"
+                android:summary="@string/lan_sync_sync_now_summary" />
+        </PreferenceCategory>
+    </PreferenceScreen>
+
+    <PreferenceScreen
         android:key="screen_backup"
         android:title="@string/backup_category_title"
         android:summary="@string/settings_screen_backup_summary"
