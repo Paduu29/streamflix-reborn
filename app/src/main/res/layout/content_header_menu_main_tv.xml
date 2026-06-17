@@ -5,8 +5,6 @@
     android:layout_width="match_parent"
     android:layout_height="wrap_content"
     android:layout_marginTop="16dp"
-    android:focusable="true"
-    android:focusableInTouchMode="true"
     android:padding="10dp"
     android:background="?attr/app_background_color">
 
@@ -14,8 +12,10 @@
         android:id="@+id/iv_navigation_header_icon"
         android:layout_width="24dp"
         android:layout_height="24dp"
-        android:duplicateParentState="true"
+        android:focusable="true"
+        android:focusableInTouchMode="true"
         android:foreground="@drawable/fg_navigation_header_icon_tv"
+        android:nextFocusDown="@id/fl_header_profile_avatar"
         android:padding="2dp"
         android:scaleType="fitCenter"
         app:layout_constraintStart_toStartOf="parent"
@@ -60,6 +60,8 @@
         android:layout_marginTop="8dp"
         android:focusable="true"
         android:focusableInTouchMode="true"
+        android:nextFocusUp="@id/iv_navigation_header_icon"
+        android:nextFocusDown="@id/search"
         android:background="@drawable/bg_profile_header_tv"
         app:layout_constraintStart_toStartOf="@id/iv_navigation_header_icon"
         app:layout_constraintTop_toBottomOf="@id/iv_navigation_header_icon">

@@ -107,13 +107,15 @@ object ProfileManager {
         Log.i(TAG, "Migrated ${legacyPrefs.all.size} legacy preferences to profile: $DEFAULT_PROFILE_ID")
     }
 
-    fun switchToProfile(profileId: String) {
+    fun switchToProfile(profileId: String, preserveProvider: Boolean = true) {
         kotlinx.coroutines.runBlocking {
             val profile = profileDao?.getProfileById(profileId)
             if (profile == null) {
                 Log.e(TAG, "Cannot switch to non-existent profile: $profileId")
                 return@runBlocking
             }
+
+            val currentProviderName = if (preserveProvider) UserPreferences.getCurrentProviderName() else null
 
             AppDatabase.resetInstance()
             UserDataCache.clearAll(appContext)
@@ -123,7 +125,9 @@ object ProfileManager {
 
             applyActiveProfilePrefs()
 
-            UserPreferences.currentProvider = UserPreferences.currentProvider
+            if (preserveProvider && currentProviderName != UserPreferences.getCurrentProviderName()) {
+                UserPreferences.setCurrentProviderName(currentProviderName)
+            }
             Log.i(TAG, "Switched to profile: ${profile.name} (${profile.id})")
         }
     }

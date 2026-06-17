@@ -108,6 +108,12 @@ object UserPreferences {
             ProviderChangeNotifier.notifyProviderChanged()
         }
 
+    internal fun getCurrentProviderName(): String? = Key.CURRENT_PROVIDER.getString()
+
+    internal fun setCurrentProviderName(name: String?) {
+        Key.CURRENT_PROVIDER.setString(name)
+    }
+
     fun getProviderCache(provider: Provider, key: String): String {
         return providerCache
             .optJSONObject(provider.name)

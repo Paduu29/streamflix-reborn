@@ -1236,10 +1236,15 @@ class SettingsMobileFragment : PreferenceFragmentCompat() {
             .setItems(items.toTypedArray()) { _, which ->
                 when (items[which]) {
                     getString(R.string.profile_action_switch) -> {
+                        val oldProfileId = ProfileManager.activeProfileId
+                        val oldLang = oldProfileId?.let { AppLanguageManager.getProfileLanguage(requireContext(), it) }
                         ProfileManager.switchToProfile(profile.id)
-                        requireActivity().apply {
-                            finish()
-                            startActivity(Intent(this, this::class.java))
+                        val newLang = AppLanguageManager.getProfileLanguage(requireContext(), profile.id)
+                        if (newLang != (oldLang ?: AppLanguageManager.SYSTEM_LANGUAGE)) {
+                            requireActivity().apply {
+                                finish()
+                                startActivity(Intent(this, this::class.java))
+                            }
                         }
                     }
                     getString(R.string.profile_action_rename) -> showRenameProfileDialog(profile)

@@ -147,7 +147,12 @@ class MainMobileActivity : FragmentActivity() {
             val activeProfile = ProfileManager.activeProfile
             if (activeProfile != null) {
                 val hasProvider = UserPreferences.currentProvider != null
-                val destination = if (hasProvider) R.id.home else R.id.providers
+                val navToProviders = intent.getBooleanExtra("NAV_TO_PROVIDERS", false)
+                val destination = when {
+                    navToProviders -> R.id.providers
+                    hasProvider -> R.id.home
+                    else -> R.id.providers
+                }
                 navController.navigate(
                     destination,
                     null,

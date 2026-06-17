@@ -1,5 +1,6 @@
 package com.streamflixreborn.streamflix.fragments.profiles
 
+import android.content.Intent
 import android.os.Bundle
 import android.view.LayoutInflater
 import android.view.View
@@ -17,6 +18,7 @@ import com.streamflixreborn.streamflix.R
 import com.streamflixreborn.streamflix.adapters.ProfileAdapter
 import com.streamflixreborn.streamflix.databinding.FragmentProfilesMobileBinding
 import com.streamflixreborn.streamflix.models.Profile
+import com.streamflixreborn.streamflix.utils.AppLanguageManager
 import com.streamflixreborn.streamflix.utils.ProfileManager
 import com.streamflixreborn.streamflix.utils.UserPreferences
 import com.streamflixreborn.streamflix.utils.dp
@@ -86,12 +88,29 @@ class ProfilesMobileFragment : Fragment() {
     }
 
     private fun selectProfile(profile: Profile) {
-        ProfileManager.switchToProfile(profile.id)
-        navigateToNext()
+        val oldProfileId = ProfileManager.activeProfileId
+        val oldLang = oldProfileId?.let { AppLanguageManager.getProfileLanguage(requireContext(), it) }
+        val cameFromProviders = findNavController().previousBackStackEntry?.destination?.id == R.id.providers
+        ProfileManager.switchToProfile(profile.id, preserveProvider = !cameFromProviders)
+        val newLang = AppLanguageManager.getProfileLanguage(requireContext(), profile.id)
+        if (newLang != (oldLang ?: AppLanguageManager.SYSTEM_LANGUAGE)) {
+            requireActivity().apply {
+                finish()
+                startActivity(Intent(this, this::class.java).apply {
+                    if (cameFromProviders) putExtra("NAV_TO_PROVIDERS", true)
+                })
+            }
+        } else {
+            navigateToNext(cameFromProviders)
+        }
     }
 
-    private fun navigateToNext() {
-        val destination = if (UserPreferences.currentProvider != null) R.id.home else R.id.providers
+    private fun navigateToNext(cameFromProviders: Boolean = false) {
+        val destination = when {
+            cameFromProviders -> R.id.providers
+            UserPreferences.currentProvider != null -> R.id.home
+            else -> R.id.providers
+        }
         if (!findNavController().popBackStack(destination, false)) {
             findNavController().navigate(destination)
         }

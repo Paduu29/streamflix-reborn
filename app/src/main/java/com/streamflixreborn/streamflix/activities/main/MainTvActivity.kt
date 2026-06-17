@@ -83,10 +83,11 @@ class MainTvActivity : FragmentActivity() {
         if (savedInstanceState == null) {
             val activeProfile = ProfileManager.activeProfile
             if (activeProfile != null) {
-                if (UserPreferences.currentProvider != null) {
-                    navController.navigate(R.id.home)
-                } else {
-                    navController.navigate(R.id.providers)
+                val navToProviders = intent.getBooleanExtra("NAV_TO_PROVIDERS", false)
+                when {
+                    navToProviders -> navController.navigate(R.id.providers)
+                    UserPreferences.currentProvider != null -> navController.navigate(R.id.home)
+                    else -> navController.navigate(R.id.providers)
                 }
             }
         }
@@ -203,9 +204,11 @@ class MainTvActivity : FragmentActivity() {
                 if (hasFocus) binding.navMain.open()
             }
 
-            setOnClickListener {
+            header.ivNavigationHeaderIcon.setOnClickListener {
                 navController.navigate(R.id.providers)
             }
+
+            binding.navMain.menuView.getChildAt(0)?.nextFocusUpId = R.id.fl_header_profile_avatar
 
             setOnOpenListener {
                 header.tvNavigationHeaderTitle.visibility = View.VISIBLE
