@@ -1,0 +1,71 @@
+package com.streamflixreborn.streamflix.adapters
+
+import android.graphics.drawable.GradientDrawable
+import android.view.LayoutInflater
+import android.view.View
+import android.view.ViewGroup
+import android.widget.ImageView
+import android.widget.TextView
+import androidx.recyclerview.widget.DiffUtil
+import androidx.recyclerview.widget.ListAdapter
+import androidx.recyclerview.widget.RecyclerView
+import com.streamflixreborn.streamflix.R
+import com.streamflixreborn.streamflix.models.Profile
+
+class ProfileAdapter(
+    private val onProfileClick: (Profile) -> Unit,
+    private val onProfileLongClick: (Profile) -> Unit,
+    private val layoutResId: Int = R.layout.item_profile_mobile,
+) : ListAdapter<Profile, ProfileAdapter.ProfileViewHolder>(DiffCallback) {
+
+    private val profileColors = intArrayOf(
+        0xFF1E88E5.toInt(), 0xFF43A047.toInt(), 0xFFE53935.toInt(),
+        0xFFFB8C00.toInt(), 0xFF8E24AA.toInt(), 0xFF00ACC1.toInt(),
+        0xFFD81B60.toInt(), 0xFF3949AB.toInt(), 0xFF6D4C41.toInt(),
+        0xFF546E7A.toInt(),
+    )
+
+    override fun onCreateViewHolder(parent: ViewGroup, viewType: Int): ProfileViewHolder {
+        val root = LayoutInflater.from(parent.context).inflate(layoutResId, parent, false)
+        return ProfileViewHolder(root)
+    }
+
+    override fun onBindViewHolder(holder: ProfileViewHolder, position: Int) {
+        holder.bind(getItem(position))
+    }
+
+    inner class ProfileViewHolder(item: View) : RecyclerView.ViewHolder(item) {
+        private val ivProfileAvatar: ImageView = itemView.findViewById(R.id.iv_profile_avatar)
+        private val tvProfileInitial: TextView = itemView.findViewById(R.id.tv_profile_initial)
+        private val tvProfileName: TextView = itemView.findViewById(R.id.tv_profile_name)
+
+        fun bind(profile: Profile) {
+            val colorIndex = bindingAdapterPosition % profileColors.size
+            val color = profileColors[colorIndex]
+
+            val drawable = GradientDrawable().apply {
+                shape = GradientDrawable.OVAL
+                setColor(color)
+            }
+            ivProfileAvatar.setImageDrawable(drawable)
+
+            val initial = profile.name.firstOrNull()?.uppercase() ?: "?"
+            tvProfileInitial.text = initial
+            tvProfileName.text = profile.name
+
+            itemView.setOnClickListener { onProfileClick(profile) }
+            itemView.setOnLongClickListener {
+                onProfileLongClick(profile)
+                true
+            }
+        }
+    }
+
+    private object DiffCallback : DiffUtil.ItemCallback<Profile>() {
+        override fun areItemsTheSame(oldItem: Profile, newItem: Profile): Boolean =
+            oldItem.id == newItem.id
+
+        override fun areContentsTheSame(oldItem: Profile, newItem: Profile): Boolean =
+            oldItem == newItem
+    }
+}

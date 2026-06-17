@@ -14,6 +14,7 @@ import com.streamflixreborn.streamflix.models.TvShow
 import com.streamflixreborn.streamflix.models.WatchItem
 import com.streamflixreborn.streamflix.providers.Provider
 import com.streamflixreborn.streamflix.ui.UserDataNotifier
+import com.streamflixreborn.streamflix.utils.ProfileManager
 import java.io.File
 import java.util.concurrent.ConcurrentHashMap
 
@@ -42,7 +43,8 @@ object UserDataCache {
 
     private fun cacheKey(provider: Provider): String {
         val baseUrlKey = provider.baseUrl.trim().trimEnd('/')
-        return listOf(provider.name, baseUrlKey)
+        val profileId = ProfileManager.activeProfileId ?: "default"
+        return listOf(profileId, provider.name, baseUrlKey)
             .filter { it.isNotEmpty() }
             .joinToString("__")
     }

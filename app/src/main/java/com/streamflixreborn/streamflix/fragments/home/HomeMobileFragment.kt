@@ -20,6 +20,7 @@ import com.streamflixreborn.streamflix.models.Episode
 import com.streamflixreborn.streamflix.models.Movie
 import com.streamflixreborn.streamflix.models.TvShow
 import com.streamflixreborn.streamflix.ui.SpacingItemDecoration
+import com.streamflixreborn.streamflix.utils.ProfileManager
 import com.streamflixreborn.streamflix.utils.UserPreferences
 import com.streamflixreborn.streamflix.utils.dp
 import com.streamflixreborn.streamflix.utils.CacheUtils
@@ -118,6 +119,11 @@ class HomeMobileFragment : Fragment() {
         }
     }
 
+    override fun onResume() {
+        super.onResume()
+        if (_binding != null) setupProfileHeader()
+    }
+
     override fun onDestroyView() {
         super.onDestroyView()
         appAdapter.onSaveInstanceState(binding.rvHome)
@@ -148,8 +154,33 @@ class HomeMobileFragment : Fragment() {
             }
         }
         
+        setupProfileHeader()
+
         // Ensure background image is hidden on mobile to show theme color
         binding.ivHomeBackground.visibility = View.GONE
+    }
+
+    private fun setupProfileHeader() {
+        val profile = ProfileManager.activeProfile
+        if (profile != null) {
+            val colors = intArrayOf(
+                0xFF1E88E5.toInt(), 0xFF43A047.toInt(), 0xFFE53935.toInt(),
+                0xFFFB8C00.toInt(), 0xFF8E24AA.toInt(), 0xFF00ACC1.toInt(),
+                0xFFD81B60.toInt(), 0xFF3949AB.toInt(), 0xFF6D4C41.toInt(),
+                0xFF546E7A.toInt(),
+            )
+            val color = colors[profile.position.coerceAtLeast(0) % colors.size]
+            val drawable = android.graphics.drawable.GradientDrawable().apply {
+                shape = android.graphics.drawable.GradientDrawable.OVAL
+                setColor(color)
+            }
+            binding.ivProfileAvatar.setImageDrawable(drawable)
+            binding.tvProfileInitial.text = profile.name.firstOrNull()?.uppercase() ?: "?"
+            binding.tvProfileName.text = profile.name
+        }
+        binding.llProfile.setOnClickListener {
+            findNavController().navigate(R.id.profiles)
+        }
     }
 
     private fun displayHome(categories: List<Category>) {

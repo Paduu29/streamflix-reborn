@@ -34,6 +34,7 @@ import com.streamflixreborn.streamflix.providers.IptvProvider
 import com.streamflixreborn.streamflix.providers.Provider
 import com.streamflixreborn.streamflix.ui.UpdateAppMobileDialog
 import com.streamflixreborn.streamflix.utils.AppLanguageManager
+import com.streamflixreborn.streamflix.utils.ProfileManager
 import com.streamflixreborn.streamflix.utils.ProviderChangeNotifier
 import com.streamflixreborn.streamflix.utils.ThemeManager
 import com.streamflixreborn.streamflix.utils.UserPreferences
@@ -143,13 +144,16 @@ class MainMobileActivity : FragmentActivity() {
         }
 
         if (savedInstanceState == null) {
-            UserPreferences.currentProvider?.let {
+            val activeProfile = ProfileManager.activeProfile
+            if (activeProfile != null) {
+                val hasProvider = UserPreferences.currentProvider != null
+                val destination = if (hasProvider) R.id.home else R.id.providers
                 navController.navigate(
-                    R.id.home,
+                    destination,
                     null,
                     navOptions {
                         launchSingleTop = true
-                        popUpTo(R.id.providers) {
+                        popUpTo(R.id.profiles) {
                             inclusive = true
                         }
                     }
@@ -227,6 +231,27 @@ class MainMobileActivity : FragmentActivity() {
                     isTopLevelProviderDestination(currentDestinationId)
                 ) {
                     navigateToProviderHome(navController)
+                    return
+                }
+
+                if (currentDestinationId == R.id.providers && UserPreferences.currentProvider != null) {
+                    navigateToProviderHome(navController)
+                    return
+                }
+
+                if (currentDestinationId == R.id.profiles && ProfileManager.activeProfile != null) {
+                    if (UserPreferences.currentProvider != null) {
+                        navigateToProviderHome(navController)
+                    } else {
+                        navController.navigate(
+                            R.id.providers,
+                            null,
+                            navOptions {
+                                launchSingleTop = true
+                                popUpTo(R.id.profiles) { inclusive = false }
+                            }
+                        )
+                    }
                     return
                 }
 
@@ -327,7 +352,7 @@ class MainMobileActivity : FragmentActivity() {
                 null,
                 navOptions {
                     launchSingleTop = true
-                    popUpTo(R.id.providers) {
+                    popUpTo(R.id.profiles) {
                         inclusive = true
                     }
                 }

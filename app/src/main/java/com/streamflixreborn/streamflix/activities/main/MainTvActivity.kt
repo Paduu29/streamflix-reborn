@@ -27,6 +27,7 @@ import com.streamflixreborn.streamflix.providers.IptvProvider
 import com.streamflixreborn.streamflix.providers.Provider
 import com.streamflixreborn.streamflix.providers.Cine24hProvider
 import com.streamflixreborn.streamflix.utils.AppLanguageManager
+import com.streamflixreborn.streamflix.utils.ProfileManager
 import com.streamflixreborn.streamflix.utils.ThemeManager
 import com.streamflixreborn.streamflix.utils.UserPreferences
 import com.streamflixreborn.streamflix.utils.getCurrentFragment
@@ -40,6 +41,7 @@ class MainTvActivity : FragmentActivity() {
     private val viewModel by viewModels<MainViewModel>()
 
     private lateinit var updateAppDialog: UpdateAppTvDialog
+    private lateinit var navController: androidx.navigation.NavController
 
     override fun attachBaseContext(newBase: android.content.Context) {
         super.attachBaseContext(AppLanguageManager.wrap(newBase))
@@ -68,7 +70,7 @@ class MainTvActivity : FragmentActivity() {
 
         val navHostFragment = this.supportFragmentManager
             .findFragmentById(binding.navMainFragment.id) as NavHostFragment
-        val navController = navHostFragment.navController
+        navController = navHostFragment.navController
 
         adjustLayoutDelta(null, null)
 
@@ -79,8 +81,13 @@ class MainTvActivity : FragmentActivity() {
         }
 
         if (savedInstanceState == null) {
-            UserPreferences.currentProvider?.let {
-                navController.navigate(R.id.home)
+            val activeProfile = ProfileManager.activeProfile
+            if (activeProfile != null) {
+                if (UserPreferences.currentProvider != null) {
+                    navController.navigate(R.id.home)
+                } else {
+                    navController.navigate(R.id.providers)
+                }
             }
         }
 
@@ -92,34 +99,7 @@ class MainTvActivity : FragmentActivity() {
         }
 
         navController.addOnDestinationChangedListener { _, destination, _ ->
-            binding.navMain.headerView?.apply {
-                val header = ContentHeaderMenuMainTvBinding.bind(this)
-
-                Glide.with(context)
-                    .load(UserPreferences.currentProvider?.logo?.takeIf { it.isNotEmpty() } ?: R.drawable.ic_provider_default_logo)
-                    .error(R.drawable.ic_provider_default_logo)
-                    .into(header.ivNavigationHeaderIcon)
-                header.tvNavigationHeaderTitle.text = UserPreferences.currentProvider?.name
-                header.tvNavigationHeaderSubtitle.text = getString(R.string.main_menu_change_provider)
-                val palette = ThemeManager.palette(UserPreferences.selectedTheme)
-                header.tvNavigationHeaderTitle.setTextColor(palette.tvHeaderPrimary)
-                header.tvNavigationHeaderSubtitle.setTextColor(palette.tvHeaderSecondary)
-                setBackgroundColor(palette.tvNavBackground)
-
-                setOnOpenListener {
-                    header.tvNavigationHeaderTitle.visibility = View.VISIBLE
-                    header.tvNavigationHeaderSubtitle.visibility = View.VISIBLE
-                }
-                setOnCloseListener {
-                    header.tvNavigationHeaderTitle.visibility = View.GONE
-                    header.tvNavigationHeaderSubtitle.visibility = View.GONE
-                }
-
-                setOnClickListener {
-                    // Navigazione manuale per evitare dipendenza da Safe Args Directions non generate
-                    navController.navigate(R.id.providers)
-                }
-            }
+            updateNavigationHeader()
 
             when (destination.id) {
                 R.id.search, R.id.home, R.id.movies, R.id.tv_shows, R.id.settings -> {
@@ -159,6 +139,15 @@ class MainTvActivity : FragmentActivity() {
             override fun handleOnBackPressed() {
                 when (navController.currentDestination?.id) {
                     R.id.home -> if (binding.navMain.hasFocus()) finish() else binding.navMain.requestFocus()
+                    R.id.profiles -> {
+                        if (UserPreferences.currentProvider != null) {
+                            navigateToProviderHome(navController)
+                        } else if (ProfileManager.activeProfile != null) {
+                            navController.navigate(R.id.providers)
+                        } else {
+                            finish()
+                        }
+                    }
                     R.id.settings, R.id.search, R.id.movies, R.id.tv_shows -> {
                         navigateToProviderHome(navController)
                         binding.navMain.requestFocus()
@@ -174,7 +163,61 @@ class MainTvActivity : FragmentActivity() {
 
     override fun onResume() {
         super.onResume()
+        updateNavigationHeader()
         viewModel.checkUpdate()
+    }
+
+    private fun updateNavigationHeader() {
+        binding.navMain.headerView?.apply {
+            val header = ContentHeaderMenuMainTvBinding.bind(this)
+
+            Glide.with(context)
+                .load(UserPreferences.currentProvider?.logo?.takeIf { it.isNotEmpty() } ?: R.drawable.ic_provider_default_logo)
+                .error(R.drawable.ic_provider_default_logo)
+                .into(header.ivNavigationHeaderIcon)
+            header.tvNavigationHeaderTitle.text = UserPreferences.currentProvider?.name
+            header.tvNavigationHeaderSubtitle.text = getString(R.string.main_menu_change_provider)
+
+            val profile = ProfileManager.activeProfile
+            if (profile != null) {
+                val colors = intArrayOf(
+                    0xFF1E88E5.toInt(), 0xFF43A047.toInt(), 0xFFE53935.toInt(),
+                    0xFFFB8C00.toInt(), 0xFF8E24AA.toInt(), 0xFF00ACC1.toInt(),
+                    0xFFD81B60.toInt(), 0xFF3949AB.toInt(), 0xFF6D4C41.toInt(),
+                    0xFF546E7A.toInt(),
+                )
+                val color = colors[profile.position.coerceAtLeast(0) % colors.size]
+                val drawable = android.graphics.drawable.GradientDrawable().apply {
+                    shape = android.graphics.drawable.GradientDrawable.OVAL
+                    setColor(color)
+                }
+                header.ivHeaderProfileAvatar.setImageDrawable(drawable)
+                header.tvHeaderProfileInitial.text = profile.name.firstOrNull()?.uppercase() ?: "?"
+                header.tvHeaderProfileName.text = profile.name
+            }
+
+            header.flHeaderProfileAvatar.setOnClickListener {
+                navController.navigate(R.id.profiles)
+            }
+            header.flHeaderProfileAvatar.onFocusChangeListener = android.view.View.OnFocusChangeListener { _, hasFocus ->
+                if (hasFocus) binding.navMain.open()
+            }
+
+            setOnClickListener {
+                navController.navigate(R.id.providers)
+            }
+
+            setOnOpenListener {
+                header.tvNavigationHeaderTitle.visibility = View.VISIBLE
+                header.tvNavigationHeaderSubtitle.visibility = View.VISIBLE
+                header.tvHeaderProfileName.visibility = View.VISIBLE
+            }
+            setOnCloseListener {
+                header.tvNavigationHeaderTitle.visibility = View.GONE
+                header.tvNavigationHeaderSubtitle.visibility = View.GONE
+                header.tvHeaderProfileName.visibility = View.GONE
+            }
+        }
     }
 
     private fun applyThemeNavigationChrome() {
@@ -213,7 +256,7 @@ class MainTvActivity : FragmentActivity() {
                 null,
                 navOptions {
                     launchSingleTop = true
-                    popUpTo(R.id.providers) {
+                    popUpTo(R.id.profiles) {
                         inclusive = true
                     }
                 }

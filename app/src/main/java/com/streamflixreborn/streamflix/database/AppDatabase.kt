@@ -15,6 +15,7 @@ import com.streamflixreborn.streamflix.models.Episode
 import com.streamflixreborn.streamflix.models.Movie
 import com.streamflixreborn.streamflix.models.Season
 import com.streamflixreborn.streamflix.models.TvShow
+import com.streamflixreborn.streamflix.utils.ProfileManager
 import com.streamflixreborn.streamflix.utils.UserPreferences
 
 @Database(
@@ -91,10 +92,12 @@ abstract class AppDatabase : RoomDatabase() {
 
         private fun buildDatabase(providerName: String, context: Context): AppDatabase {
             val sanitizedName = sanitizeProviderName(providerName)
+            val profileId = ProfileManager.activeProfileId ?: "default"
+            val profilePrefix = sanitizeProviderName(profileId)
             return Room.databaseBuilder(
                 context = context.applicationContext,
                 klass = AppDatabase::class.java,
-                name = "$sanitizedName.db"
+                name = "${profilePrefix}_$sanitizedName.db"
             )
                 .allowMainThreadQueries()
                 .addMigrations(MIGRATION_1_2)

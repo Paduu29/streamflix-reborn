@@ -21,10 +21,30 @@ object UserPreferences {
     private const val TAG = "UserPrefsDebug"
 
     private lateinit var prefs: SharedPreferences
+    private lateinit var globalPrefs: SharedPreferences
+
+    @Volatile
+    var profilePrefs: SharedPreferences? = null
+        set(value) {
+            field = value
+            if (value != null) {
+                prefs = value
+                debugLog { "Switched to profile-specific prefs" }
+            }
+        }
+
+    @Volatile
+    internal var _profileManagerReady: Boolean = false
+
+    private val effectivePrefs: SharedPreferences
+        get() = if (::prefs.isInitialized) prefs else throw IllegalStateException("UserPreferences not initialized")
+
+    private val effectiveGlobalPrefs: SharedPreferences
+        get() = if (::globalPrefs.isInitialized) globalPrefs else throw IllegalStateException("UserPreferences not initialized")
 
     // Default DoH Provider URL (Cloudflare)
     private const val DEFAULT_DOH_PROVIDER_URL = "https://cloudflare-dns.com/dns-query"
-    const val DOH_DISABLED_VALUE = "" // Value to represent DoH being disabled
+    const val DOH_DISABLED_VALUE = ""
     private const val DEFAULT_STREAMINGCOMMUNITY_DOMAIN = "streamingunity.dog"
     private const val DEFAULT_CUEVANA_DOMAIN = "cuevana.gs"
     private const val DEFAULT_POSEIDON_DOMAIN = "www.poseidonhd2.co"
@@ -45,10 +65,16 @@ object UserPreferences {
 
     fun setup(context: Context) {
         val prefsName = "${BuildConfig.APPLICATION_ID}.preferences"
+        globalPrefs = context.getSharedPreferences(
+            "${BuildConfig.APPLICATION_ID}.global_preferences",
+            Context.MODE_PRIVATE,
+        )
+
         prefs = context.getSharedPreferences(
             prefsName,
             Context.MODE_PRIVATE,
         )
+
         if (::prefs.isInitialized) {
             debugLog { "prefs initialized: ${prefs.hashCode()}" }
 
@@ -57,6 +83,11 @@ object UserPreferences {
         }
     }
 
+    var profileId: String?
+        get() = effectiveGlobalPrefs.getString("CURRENT_PROFILE_ID", null)
+        set(value) {
+            effectiveGlobalPrefs.edit().putString("CURRENT_PROFILE_ID", value).apply()
+        }
 
     var currentProvider: Provider?
         get() {
@@ -68,15 +99,12 @@ object UserPreferences {
             return Provider.providers.keys.find { it.name == providerName }
         }
         set(value) {
-            // CRITICO: Resetta l'istanza del database prima di cambiare provider
-            // per forzare la creazione di un nuovo database file corretto.
             AppDatabase.resetInstance()
 
             Key.CURRENT_PROVIDER.setString(value?.name)
             runCatching {
                 ArtworkRepairScheduler.schedule(StreamFlixApp.instance, value)
             }
-            // Notify all ViewModels that the provider has changed
             ProviderChangeNotifier.notifyProviderChanged()
         }
 
@@ -137,7 +165,7 @@ object UserPreferences {
         }
 
     var immersiveMode: Boolean
-        get() = Key.IMMERSIVE_MODE.getBoolean() ?: false // Default changed to false
+        get() = Key.IMMERSIVE_MODE.getBoolean() ?: false
         set(value) {
             Key.IMMERSIVE_MODE.setBoolean(value)
         }
@@ -255,9 +283,9 @@ object UserPreferences {
     }
 
     var updateCheckEnabled: Boolean
-        get() = Key.UPDATE_CHECK_ENABLED.getBoolean() ?: true
+        get() = effectiveGlobalPrefs.getBoolean("UPDATE_CHECK_ENABLED", true)
         set(value) {
-            Key.UPDATE_CHECK_ENABLED.setBoolean(value)
+            effectiveGlobalPrefs.edit().putBoolean("UPDATE_CHECK_ENABLED", value).apply()
         }
 
     fun unlockParentalControls() {
@@ -459,7 +487,7 @@ object UserPreferences {
         STREAMINGCOMMUNITY_DOMAIN,
         CUEVANA_DOMAIN,
         POSEIDON_DOMAIN,
-        DOH_PROVIDER_URL, // Removed STREAMINGCOMMUNITY_DNS_OVER_HTTPS, added DOH_PROVIDER_URL
+        DOH_PROVIDER_URL,
         AUTOPLAY,
         PROVIDER_CACHE,
         KEEP_SCREEN_ON_WHEN_PAUSED,
@@ -483,79 +511,84 @@ object UserPreferences {
         PROVIDER_LANGUAGE,
         FAVORITE_PROVIDERS;
 
+        private fun getPrefs(): SharedPreferences {
+            val up = UserPreferences
+            return if (up::prefs.isInitialized) up.prefs else throw IllegalStateException("UserPreferences not initialized")
+        }
+
         fun getStringSet(): Set<String>? = when {
-            prefs.contains(name) -> prefs.getStringSet(name, null)
+            getPrefs().contains(name) -> getPrefs().getStringSet(name, null)
             else -> null
         }
 
         fun setStringSet(value: Set<String>?) = value?.let {
-            with(prefs.edit()) {
+            with(getPrefs().edit()) {
                 putStringSet(name, value)
                 apply()
             }
         } ?: remove()
 
         fun getBoolean(): Boolean? = when {
-            prefs.contains(name) -> prefs.getBoolean(name, false)
+            getPrefs().contains(name) -> getPrefs().getBoolean(name, false)
             else -> null
         }
 
         fun getFloat(): Float? = when {
-            prefs.contains(name) -> prefs.getFloat(name, 0F)
+            getPrefs().contains(name) -> getPrefs().getFloat(name, 0F)
             else -> null
         }
 
         fun getInt(): Int? = when {
-            prefs.contains(name) -> prefs.getInt(name, 0)
+            getPrefs().contains(name) -> getPrefs().getInt(name, 0)
             else -> null
         }
 
         fun getLong(): Long? = when {
-            prefs.contains(name) -> prefs.getLong(name, 0)
+            getPrefs().contains(name) -> getPrefs().getLong(name, 0)
             else -> null
         }
 
         fun getString(): String? = when {
-            prefs.contains(name) -> prefs.getString(name, null)
+            getPrefs().contains(name) -> getPrefs().getString(name, null)
             else -> null
         }
 
         fun setBoolean(value: Boolean?) = value?.let {
-            with(prefs.edit()) {
+            with(getPrefs().edit()) {
                 putBoolean(name, value)
                 apply()
             }
         } ?: remove()
 
         fun setFloat(value: Float?) = value?.let {
-            with(prefs.edit()) {
+            with(getPrefs().edit()) {
                 putFloat(name, value)
                 apply()
             }
         } ?: remove()
 
         fun setInt(value: Int?) = value?.let {
-            with(prefs.edit()) {
+            with(getPrefs().edit()) {
                 putInt(name, value)
                 apply()
             }
         } ?: remove()
 
         fun setLong(value: Long?) = value?.let {
-            with(prefs.edit()) {
+            with(getPrefs().edit()) {
                 putLong(name, value)
                 apply()
             }
         } ?: remove()
 
         fun setString(value: String?) = value?.let {
-            with(prefs.edit()) {
+            with(getPrefs().edit()) {
                 putString(name, value)
                 apply()
             }
         } ?: remove()
 
-        fun remove() = with(prefs.edit()) {
+        fun remove() = with(getPrefs().edit()) {
             remove(name)
             apply()
         }

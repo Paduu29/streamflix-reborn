@@ -128,7 +128,6 @@ class HomeTvFragment : Fragment() {
     
     override fun onStart() {
         super.onStart()
-        // Riavvia il carosello se i dati sono già stati caricati e il fragment è visibile
         appAdapter.items
             .filterIsInstance<Category>()
             .firstOrNull { it.name == Category.FEATURED }
