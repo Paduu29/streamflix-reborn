@@ -13,7 +13,6 @@ import androidx.navigation.fragment.findNavController
 import com.bumptech.glide.Glide
 import com.streamflixreborn.streamflix.R
 import com.streamflixreborn.streamflix.adapters.AppAdapter
-import com.streamflixreborn.streamflix.database.AppDatabase
 import com.streamflixreborn.streamflix.databinding.FragmentHomeMobileBinding
 import com.streamflixreborn.streamflix.models.Category
 import com.streamflixreborn.streamflix.models.Episode
@@ -43,7 +42,7 @@ class HomeMobileFragment : Fragment() {
         val factory = object : ViewModelProvider.Factory {
             override fun <T : ViewModel> create(modelClass: Class<T>): T {
                 @Suppress("UNCHECKED_CAST")
-                return HomeViewModel(AppDatabase.getInstance(requireContext())) as T
+                return HomeViewModel() as T
             }
         }
         ViewModelProvider(this, factory).get(providerKey, HomeViewModel::class.java)
