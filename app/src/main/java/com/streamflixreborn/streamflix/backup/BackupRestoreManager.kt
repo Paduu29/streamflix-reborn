@@ -24,7 +24,6 @@ import java.io.ByteArrayOutputStream
 import java.io.File
 import java.io.InputStream
 import java.util.Calendar
-import java.util.Locale
 import java.util.zip.ZipEntry
 import java.util.zip.ZipInputStream
 import java.util.zip.ZipOutputStream
@@ -338,10 +337,7 @@ class BackupRestoreManager(
     }
 
     private fun addDatabaseFilesToZip(zip: ZipOutputStream, providerName: String) {
-        val dbName = sanitizedDbName(providerName)
-        val profileId = ProfileManager.activeProfileId ?: "default"
-        val profilePrefix = sanitizedDbName(profileId)
-        val prefixedDbName = "${profilePrefix}_$dbName"
+        val prefixedDbName = AppDatabase.databaseNameFor(providerName).removeSuffix(".db")
         listOf("", "-wal", "-shm").forEach { suffix ->
             val file = context.getDatabasePath("$prefixedDbName.db$suffix")
             if (!file.exists()) return@forEach
@@ -370,12 +366,6 @@ class BackupRestoreManager(
         }
     }
 
-    private fun sanitizedDbName(providerName: String): String {
-        return providerName.lowercase(Locale.getDefault())
-            .replace("[^a-z0-9]".toRegex(), "_")
-            .replace("__+".toRegex(), "_")
-            .trim('_')
-    }
 }
 private fun Long.toCalendar(): Calendar = Calendar.getInstance().apply { timeInMillis = this@toCalendar }
 

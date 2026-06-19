@@ -46,13 +46,23 @@ abstract class AppDatabase : RoomDatabase() {
         @Volatile
         private var currentProviderName: String? = null
 
-        private fun sanitizeProviderName(name: String): String {
+        fun sanitizeDatabasePart(name: String): String {
             // Rimuove caratteri non validi per i nomi dei file DB, 
             // come spazi, parentesi, e li converte in lowercase.
             return name.lowercase()
                 .replace("[^a-z0-9]".toRegex(), "_")
                 .replace("__+".toRegex(), "_") // Sostituisce doppie underscore con una singola
                 .trim('_') // Rimuove underscore iniziale/finale
+        }
+
+        fun databaseNameFor(providerName: String, profileId: String? = ProfileManager.activeProfileId): String {
+            val sanitizedName = sanitizeDatabasePart(providerName)
+            val profilePrefix = sanitizeDatabasePart(profileId ?: "default")
+            return "${profilePrefix}_$sanitizedName.db"
+        }
+
+        fun legacyDatabaseNameFor(providerName: String): String {
+            return "${sanitizeDatabasePart(providerName)}.db"
         }
 
         fun setup(context: Context) {
@@ -91,13 +101,10 @@ abstract class AppDatabase : RoomDatabase() {
         }
 
         private fun buildDatabase(providerName: String, context: Context): AppDatabase {
-            val sanitizedName = sanitizeProviderName(providerName)
-            val profileId = ProfileManager.activeProfileId ?: "default"
-            val profilePrefix = sanitizeProviderName(profileId)
             return Room.databaseBuilder(
                 context = context.applicationContext,
                 klass = AppDatabase::class.java,
-                name = "${profilePrefix}_$sanitizedName.db"
+                name = databaseNameFor(providerName)
             )
                 .allowMainThreadQueries()
                 .addMigrations(MIGRATION_1_2)

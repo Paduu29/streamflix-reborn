@@ -8,8 +8,8 @@ import com.streamflixreborn.streamflix.database.AppDatabase
 import com.streamflixreborn.streamflix.database.ProfileDatabase
 import com.streamflixreborn.streamflix.database.dao.ProfileDao
 import com.streamflixreborn.streamflix.models.Profile
+import com.streamflixreborn.streamflix.providers.Provider
 import kotlinx.coroutines.flow.Flow
-import java.util.UUID
 
 object ProfileManager {
 
@@ -76,6 +76,7 @@ object ProfileManager {
         globalPrefs?.edit()?.putString(KEY_ACTIVE_PROFILE_ID, defaultProfile.id)?.apply()
 
         migrateLegacyPrefs()
+        migrateLegacyDatabasesToDefaultProfile()
         Log.i(TAG, "Created default profile: ${defaultProfile.name}")
     }
 
@@ -105,6 +106,48 @@ object ProfileManager {
         }
 
         Log.i(TAG, "Migrated ${legacyPrefs.all.size} legacy preferences to profile: $DEFAULT_PROFILE_ID")
+    }
+
+    private fun migrateLegacyDatabasesToDefaultProfile() {
+        val currentProviderName = UserPreferences.currentProvider?.name
+        val expectedLegacyDbNames = (Provider.providers.keys.map { it.name } + listOfNotNull(currentProviderName))
+            .map { AppDatabase.legacyDatabaseNameFor(it) }
+            .toSet()
+
+        val legacyDbNames = appContext.databaseList()
+            .filter { name ->
+                name in expectedLegacyDbNames || (name.startsWith("tmdb_") && name.endsWith(".db"))
+            }
+
+        var migratedCount = 0
+        legacyDbNames.forEach { legacyDbName ->
+            val providerPart = legacyDbName.removeSuffix(".db")
+            val defaultDbName = "${AppDatabase.sanitizeDatabasePart(DEFAULT_PROFILE_ID)}_$providerPart.db"
+            val legacyDb = appContext.getDatabasePath(legacyDbName)
+            val defaultDb = appContext.getDatabasePath(defaultDbName)
+
+            if (!legacyDb.exists()) return@forEach
+            if (defaultDb.exists()) return@forEach
+
+            runCatching {
+                listOf("", "-wal", "-shm").forEach { suffix ->
+                    val source = appContext.getDatabasePath("$legacyDbName$suffix")
+                    if (!source.exists()) return@forEach
+
+                    val destination = appContext.getDatabasePath("$defaultDbName$suffix")
+                    if (destination.exists()) return@forEach
+                    destination.parentFile?.mkdirs()
+                    source.copyTo(destination, overwrite = false)
+                }
+            }.onSuccess {
+                migratedCount++
+                Log.i(TAG, "Migrated legacy database $legacyDbName to default profile database $defaultDbName")
+            }.onFailure { error ->
+                Log.e(TAG, "Failed to migrate legacy database $legacyDbName", error)
+            }
+        }
+
+        Log.i(TAG, "Migrated $migratedCount legacy databases to profile: $DEFAULT_PROFILE_ID")
     }
 
     fun switchToProfile(profileId: String, preserveProvider: Boolean = true) {
