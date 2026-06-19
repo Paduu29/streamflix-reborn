@@ -212,7 +212,9 @@ class ProfilesMobileFragment : Fragment() {
                         showProfileActions(profiles[which], profiles.size)
                     }
                 }
-                .setPositiveButton(R.string.profile_add_btn, null)
+                .setPositiveButton(R.string.profile_add_btn) { _, _ ->
+                    showCreateProfileDialog()
+                }
                 .setNegativeButton(android.R.string.cancel, null)
                 .show()
         }

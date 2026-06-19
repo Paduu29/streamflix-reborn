@@ -169,7 +169,9 @@ class ProfilesTvFragment : Fragment() {
                         showProfileActionsTv(profiles[which], profiles.size)
                     }
                 }
-                .setPositiveButton(R.string.profile_add_btn, null)
+                .setPositiveButton(R.string.profile_add_btn) { _, _ ->
+                    showCreateProfileDialogTv()
+                }
                 .setNegativeButton(android.R.string.cancel, null)
                 .show()
         }
