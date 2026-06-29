@@ -7,6 +7,7 @@ import java.security.Security
 import org.conscrypt.Conscrypt
 import com.streamflixreborn.streamflix.database.AppDatabase
 import com.streamflixreborn.streamflix.providers.AniWorldProvider
+import com.streamflixreborn.streamflix.providers.HdFullProvider
 import com.streamflixreborn.streamflix.providers.SerienStreamProvider
 import com.streamflixreborn.streamflix.utils.AppLanguageManager
 import com.streamflixreborn.streamflix.utils.ArtworkRepairScheduler
@@ -64,6 +65,8 @@ class StreamFlixApp : Application() {
         if (level >= TRIM_MEMORY_RUNNING_LOW) {
             CacheUtils.clearAppCache(this)
         }
+        if (level >= TRIM_MEMORY_UI_HIDDEN) {
+            HdFullProvider.clearSessionCookies()
+        }
     }
 }
-

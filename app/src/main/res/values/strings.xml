@@ -269,6 +269,12 @@
     <string name="settings_screen_provider_summary">Main domain, portal and provider-specific recovery options</string>
     <string name="settings_screen_provider_summary_with_name">%1$s domain, portal and provider-specific recovery options</string>
     <string name="settings_provider_connection_category_title">%1$s connection</string>
+    <string name="settings_hdfull_connection_title">HdFull login</string>
+    <string name="settings_hdfull_username">Username</string>
+    <string name="settings_hdfull_username_summary">HdFull account username</string>
+    <string name="settings_hdfull_password">Password</string>
+    <string name="settings_hdfull_password_summary">HdFull account password</string>
+    <string name="settings_hdfull_password_saved">Password saved</string>
     <string name="settings_provider_no_options_title">No provider options available</string>
     <string name="settings_provider_no_options_summary">This provider does not expose any extra configuration right now.</string>
     <string name="settings_category_provider_url">Main URL</string>

@@ -27,6 +27,7 @@ import com.streamflixreborn.streamflix.providers.IptvProvider
 import com.streamflixreborn.streamflix.providers.Provider
 import com.streamflixreborn.streamflix.providers.Cine24hProvider
 import com.streamflixreborn.streamflix.providers.FilmyOnlineCcProvider
+import com.streamflixreborn.streamflix.providers.HdFullProvider
 import com.streamflixreborn.streamflix.utils.AppLanguageManager
 import com.streamflixreborn.streamflix.utils.ThemeManager
 import com.streamflixreborn.streamflix.utils.UserPreferences
@@ -55,6 +56,7 @@ class MainTvActivity : FragmentActivity() {
         // Inizializza il provider con il context dell'attività per gestire eventuali bypass visibili
         Cine24hProvider.init(this)
         FilmyOnlineCcProvider.init(this)
+        HdFullProvider.init(this)
         
         _binding = ActivityMainTvBinding.inflate(layoutInflater)
         setContentView(binding.root)

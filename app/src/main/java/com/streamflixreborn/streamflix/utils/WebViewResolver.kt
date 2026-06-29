@@ -15,6 +15,8 @@ import android.view.KeyEvent
 import android.view.MotionEvent
 import android.view.View
 import android.view.ViewGroup
+import android.view.WindowManager
+import android.view.inputmethod.InputMethodManager
 import android.webkit.*
 import android.widget.Button
 import android.widget.FrameLayout
@@ -40,18 +42,24 @@ class WebViewResolver(private val context: Context) {
     private var cursorY = 0f
     private var virtualCursor: ImageView? = null
     private var pollingCount = 0
+    private var loginKeyboardPrimed = false
     private val isTv = context.packageManager.hasSystemFeature(PackageManager.FEATURE_LEANBACK)
 
     private val challengeKeywords = listOf(
         "Just a moment...", "cf-browser-verification", "challenge-running", "Checking your browser", "cloudflare"
     )
 
-    suspend fun get(url: String, headers: Map<String, String> = emptyMap()): String = mutex.withLock {
+    suspend fun get(
+        url: String,
+        headers: Map<String, String> = emptyMap(),
+        completion: ((currentUrl: String, html: String, cookies: String) -> Boolean)? = null
+    ): String = mutex.withLock {
         Log.d(TAG, "[WebView] Fetching: $url (IsTV: $isTv)")
         pollingCount = 0
+        loginKeyboardPrimed = false
         val result = withTimeoutOrNull(120000) {
             suspendCancellableCoroutine { continuation ->
-                mainHandler.post { setupWebView(url, headers, continuation) }
+                mainHandler.post { setupWebView(url, headers, completion, continuation) }
                 continuation.invokeOnCancellation { cleanup() }
             }
         }
@@ -60,12 +68,18 @@ class WebViewResolver(private val context: Context) {
     }
 
     @SuppressLint("SetJavaScriptEnabled")
-    private fun setupWebView(url: String, headers: Map<String, String>, continuation: kotlinx.coroutines.CancellableContinuation<String>) {
+    private fun setupWebView(
+        url: String,
+        headers: Map<String, String>,
+        completion: ((currentUrl: String, html: String, cookies: String) -> Boolean)?,
+        continuation: kotlinx.coroutines.CancellableContinuation<String>
+    ) {
         webView = WebView(context).apply {
             setBackgroundColor(Color.WHITE)
             // IMPORTANTE: Su TV non deve essere focusable per lasciare il controllo al container
             isFocusable = !isTv 
             isFocusableInTouchMode = !isTv
+            isClickable = true
             
             // Stabilità Rendering Software per Android TV 9 (come da registro)
             if (isTv) {
@@ -82,11 +96,25 @@ class WebViewResolver(private val context: Context) {
                 useWideViewPort = true
             }
 
+            CookieManager.getInstance().setAcceptCookie(true)
+            CookieManager.getInstance().setAcceptThirdPartyCookies(this, true)
+
+            if (!isTv) {
+                setOnTouchListener { view, _ ->
+                    view.requestFocus()
+                    view.requestFocusFromTouch()
+                    showSoftKeyboard(view)
+                    false
+                }
+            }
+
             webViewClient = object : WebViewClient() {
                 override fun onPageFinished(view: WebView?, currentUrl: String?) {
                     Log.d(TAG, "[WebView] onPageFinished: $currentUrl")
                     mainHandler.postDelayed({
-                        if (webView != null) checkChallengeStatus(view, currentUrl ?: url, continuation)
+                        if (webView != null) {
+                            checkChallengeStatus(view, currentUrl ?: url, completion, continuation)
+                        }
                     }, 1500)
                 }
             }
@@ -94,7 +122,12 @@ class WebViewResolver(private val context: Context) {
         }
     }
 
-    private fun checkChallengeStatus(view: WebView?, currentUrl: String, continuation: kotlinx.coroutines.CancellableContinuation<String>) {
+    private fun checkChallengeStatus(
+        view: WebView?,
+        currentUrl: String,
+        completion: ((currentUrl: String, html: String, cookies: String) -> Boolean)?,
+        continuation: kotlinx.coroutines.CancellableContinuation<String>
+    ) {
         if (continuation.isCompleted || webView == null) return
         
         val cookieManager = CookieManager.getInstance()
@@ -109,11 +142,18 @@ class WebViewResolver(private val context: Context) {
             val hasContent = cleanHtml.contains("article") || cleanHtml.contains("iframe") || 
                              cleanHtml.contains("TPost") || cleanHtml.contains("grid-item") || 
                              cleanHtml.contains("optnslst") // Rilevamento server Cine24h (come da registro)
+            val success = completion?.invoke(currentUrl, cleanHtml, cookies)
+                ?: ((!isChallenge && hasContent && cleanHtml.length > 1000) || hasClearance)
+
+            if (!isTv && !loginKeyboardPrimed && currentUrl.contains("/login", ignoreCase = true)) {
+                loginKeyboardPrimed = true
+                primeLoginFocus(view)
+            }
 
             Log.d(TAG, "[WebView] Status -> Challenge: $isChallenge, Content: $hasContent, Clearance: $hasClearance, Polling: $pollingCount")
 
             // Se rileviamo sblocco, chiudiamo tutto subito
-            if ((!isChallenge && hasContent && cleanHtml.length > 1000) || hasClearance) {
+            if (success) {
                 Log.d(TAG, "[WebView] SUCCESS detected! Closing bypass.")
                 cookieManager.flush()
                 if (continuation.isActive) {
@@ -124,14 +164,16 @@ class WebViewResolver(private val context: Context) {
             }
 
             // Se dopo 2 polling (circa 3-4 secondi) non c'è contenuto, mostriamo il dialog per sbloccare
-            if (dialog == null && pollingCount >= 2 && !hasContent) {
+            if (dialog == null && pollingCount >= 2 && (!hasContent || completion != null)) {
                 Log.d(TAG, "[WebView] Content not found, forcing Visible Challenge UI")
                 showVisibleChallenge(continuation)
             }
 
             pollingCount++
             if (pollingCount < 80) {
-                mainHandler.postDelayed({ checkChallengeStatus(view, currentUrl, continuation) }, 2000)
+                mainHandler.postDelayed({
+                    checkChallengeStatus(view, currentUrl, completion, continuation)
+                }, 2000)
             } else {
                 Log.w(TAG, "[WebView] Max polling reached")
                 if (continuation.isActive) continuation.resume("<html>$cleanHtml</html>")
@@ -239,8 +281,39 @@ class WebViewResolver(private val context: Context) {
                     }
                 }
                 Log.d(TAG, "[WebView] Challenge Dialog DISPLAYED (isTv: $isTv)")
+
+                if (!isTv) {
+                    dialog?.window?.setSoftInputMode(
+                        WindowManager.LayoutParams.SOFT_INPUT_ADJUST_RESIZE or
+                            WindowManager.LayoutParams.SOFT_INPUT_STATE_ALWAYS_VISIBLE
+                    )
+                    webView?.requestFocus(View.FOCUS_DOWN)
+                    webView?.post {
+                        webView?.requestFocusFromTouch()
+                        showSoftKeyboard(webView)
+                    }
+                }
             } catch (e: Exception) { Log.e(TAG, "[WebView] CRITICAL UI ERROR", e) }
         }
+    }
+
+    private fun primeLoginFocus(view: WebView?) {
+        view ?: return
+        view.post {
+            view.requestFocus()
+            view.requestFocusFromTouch()
+            showSoftKeyboard(view)
+            view.evaluateJavascript(
+                "(function(){var el=document.querySelector('input[name=\"username\"], input[type=\"text\"], input:not([type]), input[type=\"email\"]'); if(el){el.focus(); el.click();} return true;})();",
+                null
+            )
+        }
+    }
+
+    private fun showSoftKeyboard(view: View?) {
+        view ?: return
+        val imm = context.getSystemService(Context.INPUT_METHOD_SERVICE) as? InputMethodManager ?: return
+        imm.showSoftInput(view, InputMethodManager.SHOW_IMPLICIT)
     }
 
     private fun updateCursorPosition() {
