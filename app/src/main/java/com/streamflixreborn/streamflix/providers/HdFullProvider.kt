@@ -208,11 +208,7 @@ object HdFullProvider : Provider {
 
     override suspend fun getTvShow(id: String): TvShow {
         val doc = getDocument(mediaUrl(id, isMovie = false))
-        val showNumericId = Regex("""var\s+sid\s*=\s*'([^']+)'""")
-            .find(doc.outerHtml())
-            ?.groupValues
-            ?.getOrNull(1)
-            ?: throw IllegalStateException("HdFull show sid missing")
+        val showNumericId = extractShowNumericId(doc).orEmpty()
 
         val poster = doc.selectFirst(".show-poster img")?.absUrl("src")?.normalizeThumb()
         val seasons = doc.select("a[href*='/temporada-']")
@@ -223,7 +219,9 @@ object HdFullProvider : Provider {
                 Season(
                     id = "$id|$showNumericId|$seasonNumber",
                     number = seasonNumber,
-                    title = seasonLink.text().ifBlank { "Temporada $seasonNumber" },
+                    title = seasonLink.selectFirst("[itemprop='name'], h5")?.text()?.trim().ifNullOrBlank {
+                        seasonLink.text().cleanDisplayText().ifBlank { "Temporada $seasonNumber" }
+                    },
                     poster = poster,
                 )
             }
@@ -248,8 +246,14 @@ object HdFullProvider : Provider {
         if (parts.size < 3) return emptyList()
 
         val showSlug = parts[0]
-        val showId = parts[1]
+        val showId = parts[1].ifBlank {
+            extractShowNumericId(getDocument(mediaUrl(showSlug, isMovie = false))).orEmpty()
+        }
         val seasonNumber = parts[2].toIntOrNull() ?: return emptyList()
+        if (showId.isBlank()) {
+            Log.w(TAG, "getEpisodesBySeason: missing HdFull sid for $showSlug")
+            return emptyList()
+        }
 
         return try {
             val body = FormBody.Builder()
@@ -364,14 +368,15 @@ object HdFullProvider : Provider {
         }
     }
 
-    private fun fetchDocument(url: String): Document {
+    private suspend fun fetchDocument(url: String): Document {
         val request = Request.Builder()
             .url(url)
             .header("Referer", baseUrl)
+            .header("Accept", "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8")
             .build()
 
         val html = execute(request)
-        return Jsoup.parse(html).apply { setBaseUri(baseUrl) }
+        return Jsoup.parse(html).apply { setBaseUri(url) }
     }
 
     private suspend fun ensureInteractiveAccess(targetUrl: String) {
@@ -486,7 +491,22 @@ object HdFullProvider : Provider {
             !lowerHtml.contains("dologin('#popup_login_result')")
     }
 
-    private fun execute(request: Request): String {
+    private suspend fun execute(request: Request, allowAuthRetry: Boolean = true): String {
+        return try {
+            executeOnce(request)
+        } catch (error: IllegalStateException) {
+            if (!allowAuthRetry || !isAuthFailure(error) || !isHdFullUrl(request.url.toString())) {
+                throw error
+            }
+
+            Log.w(TAG, "Refreshing HdFull clearance after 403 for ${request.url}", error)
+            clearSessionCookies()
+            ensureInteractiveAccess(baseUrl)
+            executeOnce(request)
+        }
+    }
+
+    private fun executeOnce(request: Request): String {
         val requestWithCookies = request.newBuilder()
             .header("Cookie", collectCookies(request.url.toString()))
             .build()
@@ -515,7 +535,7 @@ object HdFullProvider : Provider {
         val request = buildLoginRequest() ?: return false
 
         return try {
-            execute(request)
+            execute(request, allowAuthRetry = false)
             activeSessionCookies = mergeCookieStrings(
                 activeSessionCookies,
                 rawCookieHeader(targetUrl),
@@ -548,6 +568,7 @@ object HdFullProvider : Provider {
             .header("Origin", baseUrl)
             .header("X-Requested-With", "XMLHttpRequest")
             .header("Accept", "application/json, text/javascript, */*; q=0.01")
+            .header("Sec-Fetch-Site", "same-origin")
             .build()
     }
 
@@ -706,7 +727,7 @@ object HdFullProvider : Provider {
         val heading = previousElementSibling()?.takeIf { it.tagName() in setOf("h1", "h2", "h3", "h4", "h5") }
             ?: parent()?.previousElementSibling()?.takeIf { it.tagName() in setOf("h1", "h2", "h3", "h4", "h5") }
 
-        val headingText = heading?.text()?.trim().orEmpty()
+        val headingText = heading?.cleanSectionTitle().orEmpty()
         if (headingText.isNotBlank()) return headingText
 
         val container = parents().firstOrNull { parent ->
@@ -714,10 +735,44 @@ object HdFullProvider : Provider {
         }
         return container
             ?.selectFirst("h1, h2, h3, h4, h5, .title, .section-title, .block-title")
-            ?.text()
-            ?.trim()
+            ?.cleanSectionTitle()
             .orEmpty()
             .ifBlank { "HdFull" }
+    }
+
+    private fun org.jsoup.nodes.Element.cleanSectionTitle(): String {
+        val clone = clone()
+        clone.select("a, button, .more, .see-more, .view-more").remove()
+
+        return sequenceOf(
+            clone.ownText(),
+            clone.text(),
+        ).map { it.cleanDisplayText() }
+            .firstOrNull { it.isNotBlank() }
+            .orEmpty()
+    }
+
+    private fun String.cleanDisplayText(): String {
+        return replace("""\\[tnr]""".toRegex(), " ")
+            .replace("\\s+".toRegex(), " ")
+            .replace("""\bm[aá]s\b.*$""".toRegex(RegexOption.IGNORE_CASE), "")
+            .trim()
+    }
+
+    private inline fun String?.ifNullOrBlank(fallback: () -> String): String {
+        return if (this.isNullOrBlank()) fallback() else this
+    }
+
+    private fun extractShowNumericId(doc: Document): String? {
+        val html = doc.outerHtml()
+        return sequenceOf(
+            Regex("""var\s+sid\s*=\s*['"]?(\d+)['"]?""", RegexOption.IGNORE_CASE).find(html)?.groupValues?.getOrNull(1),
+            Regex("""(?:let|const)\s+sid\s*=\s*['"]?(\d+)['"]?""", RegexOption.IGNORE_CASE).find(html)?.groupValues?.getOrNull(1),
+            Regex("""["']sid["']\s*:\s*["']?(\d+)["']?""", RegexOption.IGNORE_CASE).find(html)?.groupValues?.getOrNull(1),
+            doc.selectFirst("[data-sid]")?.attr("data-sid"),
+            doc.selectFirst("input[name='sid']")?.attr("value"),
+            doc.selectFirst("input[name='show']")?.attr("value"),
+        ).firstOrNull { !it.isNullOrBlank() }?.trim()
     }
 
     private suspend fun resolveGenericVideo(url: String, server: Video.Server, depth: Int = 0): Video {
@@ -920,6 +975,8 @@ object HdFullProvider : Provider {
     private fun collectCookies(url: String): String {
         val normalizedUrl = normalizeRequestUrl(url)
         if (isHdFullUrl(normalizedUrl)) {
+            val liveCookies = rawCookieHeader(normalizedUrl)
+            activeSessionCookies = mergeCookieStrings(activeSessionCookies, liveCookies)
             return activeSessionCookies.orEmpty()
         }
 
