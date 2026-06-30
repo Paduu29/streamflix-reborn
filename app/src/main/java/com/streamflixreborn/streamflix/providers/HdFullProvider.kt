@@ -383,6 +383,9 @@ object HdFullProvider : Provider {
                 return@withLock
             }
 
+            activeSessionCookies = null
+            sessionPrimed = false
+
             if (hasCloudflareClearance(targetUrl) && attemptAutomaticLogin(targetUrl)) {
                 sessionPrimed = hasLoginCookie(targetUrl)
                 if (sessionPrimed) {
@@ -408,7 +411,7 @@ object HdFullProvider : Provider {
 
             activeSessionCookies = mergeCookieStrings(
                 activeSessionCookies,
-                rawCookieHeader(targetUrl, allowedNames = setOf("guid", "PHPSESSID", "language")),
+                rawCookieHeader(targetUrl, allowedNames = setOf("cf_clearance", "guid", "PHPSESSID", "language")),
             )
 
             if (!attemptAutomaticLogin(targetUrl)) {
@@ -511,7 +514,7 @@ object HdFullProvider : Provider {
             execute(request)
             activeSessionCookies = mergeCookieStrings(
                 activeSessionCookies,
-                rawCookieHeader(targetUrl, allowedNames = setOf("guid", "PHPSESSID", "language")),
+                rawCookieHeader(targetUrl, allowedNames = setOf("cf_clearance", "guid", "PHPSESSID", "language")),
             )
             hasLoginCookie(targetUrl)
         } catch (error: Exception) {
