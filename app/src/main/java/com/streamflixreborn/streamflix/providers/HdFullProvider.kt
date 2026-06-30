@@ -378,20 +378,12 @@ object HdFullProvider : Provider {
         authMutex.withLock {
             ensureStoredCredentials()
 
-            if (hasLoginCookie(targetUrl)) {
-                sessionPrimed = true
+            if (sessionPrimed && hasLoginCookie(targetUrl)) {
                 return@withLock
             }
 
             activeSessionCookies = null
             sessionPrimed = false
-
-            if (hasCloudflareClearance(targetUrl) && attemptAutomaticLogin(targetUrl)) {
-                sessionPrimed = hasLoginCookie(targetUrl)
-                if (sessionPrimed) {
-                    return@withLock
-                }
-            }
 
             Log.d(TAG, "Launching interactive WebView for $targetUrl")
             getResolver().get(
@@ -400,7 +392,19 @@ object HdFullProvider : Provider {
                     if (cookies.isNotBlank()) {
                         activeSessionCookies = mergeCookieStrings(activeSessionCookies, cookies)
                     }
-                    cookies.contains("cf_clearance=") && !isCloudflareChallengePage(currentUrl, html)
+                    isLoggedIn(currentUrl, html, mergeCookieStrings(activeSessionCookies, cookies))
+                },
+                pageReadyScriptProvider = { currentUrl, html, cookies ->
+                    if (!cookies.contains("cf_clearance=")) {
+                        return@get null
+                    }
+                    if (isLoggedIn(currentUrl, html, mergeCookieStrings(activeSessionCookies, cookies))) {
+                        return@get null
+                    }
+                    if (!requiresInteractiveAccess(currentUrl, html)) {
+                        return@get null
+                    }
+                    buildLoginAutomationScript()
                 }
             )
 
@@ -411,10 +415,10 @@ object HdFullProvider : Provider {
 
             activeSessionCookies = mergeCookieStrings(
                 activeSessionCookies,
-                rawCookieHeader(targetUrl, allowedNames = setOf("cf_clearance", "guid", "PHPSESSID", "language")),
+                rawCookieHeader(targetUrl),
             )
 
-            if (!attemptAutomaticLogin(targetUrl)) {
+            if (!hasLoginCookie(targetUrl) && !attemptAutomaticLogin(targetUrl)) {
                 sessionPrimed = false
                 throw IllegalStateException("HdFull automatic login failed after Cloudflare access")
             }
@@ -514,7 +518,7 @@ object HdFullProvider : Provider {
             execute(request)
             activeSessionCookies = mergeCookieStrings(
                 activeSessionCookies,
-                rawCookieHeader(targetUrl, allowedNames = setOf("cf_clearance", "guid", "PHPSESSID", "language")),
+                rawCookieHeader(targetUrl),
             )
             hasLoginCookie(targetUrl)
         } catch (error: Exception) {
@@ -545,6 +549,38 @@ object HdFullProvider : Provider {
             .header("X-Requested-With", "XMLHttpRequest")
             .header("Accept", "application/json, text/javascript, */*; q=0.01")
             .build()
+    }
+
+    private fun buildLoginAutomationScript(): String {
+        val escapedUsername = JSONObject.quote(storedUsername())
+        val escapedPassword = JSONObject.quote(storedPassword())
+        return """
+            (function() {
+                if (window.__streamflixHdFullLoginSubmitted) return "already-submitted";
+                var username = document.querySelector("input[name='username'], input[type='text'], input[type='email']");
+                var password = document.querySelector("input[name='password'], input[type='password']");
+                if (!username || !password) return "missing-fields";
+                username.focus();
+                username.value = $escapedUsername;
+                username.dispatchEvent(new Event('input', { bubbles: true }));
+                username.dispatchEvent(new Event('change', { bubbles: true }));
+                password.focus();
+                password.value = $escapedPassword;
+                password.dispatchEvent(new Event('input', { bubbles: true }));
+                password.dispatchEvent(new Event('change', { bubbles: true }));
+                window.__streamflixHdFullLoginSubmitted = true;
+                if (typeof window.dologin === 'function') {
+                    window.dologin('#popup_login_result');
+                    return "submitted-dologin";
+                }
+                var form = document.querySelector("form[action*='/a/login'], form[id*='login'], form[name*='login'], #popup_login_form form");
+                if (form) {
+                    form.submit();
+                    return "submitted-form";
+                }
+                return "no-submit-path";
+            })();
+        """.trimIndent()
     }
 
     private fun parseCards(doc: Document): List<AppAdapter.Item> {
@@ -887,7 +923,6 @@ object HdFullProvider : Provider {
             return activeSessionCookies.orEmpty()
         }
 
-        val cookieManager = android.webkit.CookieManager.getInstance()
         val candidates = linkedSetOf<String>()
         val normalizedBase = normalizeRequestUrl(baseUrl)
         val alternateHost = if (normalizedUrl.contains("hdfull.one")) {
@@ -896,6 +931,7 @@ object HdFullProvider : Provider {
             "https://hdfull.one/"
         }
 
+        val cookieManager = android.webkit.CookieManager.getInstance()
         listOf(normalizedUrl, normalizedBase, alternateHost).forEach { candidate ->
             runCatching { cookieManager.getCookie(candidate) }
                 .getOrNull()

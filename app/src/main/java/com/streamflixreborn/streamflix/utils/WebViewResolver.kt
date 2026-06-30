@@ -65,9 +65,10 @@ class WebViewResolver(private val context: Context) {
         url: String,
         headers: Map<String, String> = emptyMap(),
         completion: ((currentUrl: String, html: String, cookies: String) -> Boolean)? = null,
-        shouldAllowNavigation: ((url: String, isMainFrame: Boolean) -> Boolean)? = null
+        shouldAllowNavigation: ((url: String, isMainFrame: Boolean) -> Boolean)? = null,
+        pageReadyScriptProvider: ((currentUrl: String, html: String, cookies: String) -> String?)? = null,
     ): String {
-        return getResult(url, headers, completion, shouldAllowNavigation).html
+        return getResult(url, headers, completion, shouldAllowNavigation, null, pageReadyScriptProvider).html
     }
 
     suspend fun getResult(
@@ -76,6 +77,7 @@ class WebViewResolver(private val context: Context) {
         completion: ((currentUrl: String, html: String, cookies: String) -> Boolean)? = null,
         shouldAllowNavigation: ((url: String, isMainFrame: Boolean) -> Boolean)? = null,
         valueScript: String? = null,
+        pageReadyScriptProvider: ((currentUrl: String, html: String, cookies: String) -> String?)? = null,
     ): Result = mutex.withLock {
         Log.d(TAG, "[WebView] Fetching: $url (IsTV: $isTv)")
         pollingCount = 0
@@ -83,7 +85,7 @@ class WebViewResolver(private val context: Context) {
         val result = withTimeoutOrNull(120000) {
             suspendCancellableCoroutine { continuation ->
                 mainHandler.post {
-                    setupWebView(url, headers, completion, shouldAllowNavigation, valueScript, continuation)
+                    setupWebView(url, headers, completion, shouldAllowNavigation, valueScript, pageReadyScriptProvider, continuation)
                 }
                 continuation.invokeOnCancellation { cleanup() }
             }
@@ -99,6 +101,7 @@ class WebViewResolver(private val context: Context) {
         completion: ((currentUrl: String, html: String, cookies: String) -> Boolean)?,
         shouldAllowNavigation: ((url: String, isMainFrame: Boolean) -> Boolean)?,
         valueScript: String?,
+        pageReadyScriptProvider: ((currentUrl: String, html: String, cookies: String) -> String?)?,
         continuation: kotlinx.coroutines.CancellableContinuation<Result>
     ) {
         webView = WebView(context).apply {
@@ -168,7 +171,7 @@ class WebViewResolver(private val context: Context) {
                     Log.d(TAG, "[WebView] onPageFinished: $currentUrl")
                     mainHandler.postDelayed({
                         if (webView != null) {
-                            checkChallengeStatus(view, currentUrl ?: url, completion, continuation, valueScript)
+                            checkChallengeStatus(view, currentUrl ?: url, completion, continuation, valueScript, pageReadyScriptProvider)
                         }
                     }, 1500)
                 }
@@ -189,7 +192,8 @@ class WebViewResolver(private val context: Context) {
         currentUrl: String,
         completion: ((currentUrl: String, html: String, cookies: String) -> Boolean)?,
         continuation: kotlinx.coroutines.CancellableContinuation<Result>,
-        valueScript: String? = null
+        valueScript: String? = null,
+        pageReadyScriptProvider: ((currentUrl: String, html: String, cookies: String) -> String?)? = null,
     ) {
         if (continuation.isCompleted || webView == null) return
         
@@ -213,6 +217,11 @@ class WebViewResolver(private val context: Context) {
                 primeLoginFocus(view)
             }
 
+            val pageReadyScript = pageReadyScriptProvider?.invoke(currentUrl, cleanHtml, cookies)
+            if (!pageReadyScript.isNullOrBlank()) {
+                view?.evaluateJavascript(pageReadyScript, null)
+            }
+
             Log.d(TAG, "[WebView] Status -> Challenge: $isChallenge, Content: $hasContent, Clearance: $hasClearance, Polling: $pollingCount")
 
             // Se rileviamo sblocco, chiudiamo tutto subito
@@ -234,7 +243,7 @@ class WebViewResolver(private val context: Context) {
             pollingCount++
             if (pollingCount < 80) {
                 mainHandler.postDelayed({
-                    checkChallengeStatus(view, currentUrl, completion, continuation, valueScript)
+                    checkChallengeStatus(view, currentUrl, completion, continuation, valueScript, pageReadyScriptProvider)
                 }, 2000)
             } else {
                 Log.w(TAG, "[WebView] Max polling reached")
