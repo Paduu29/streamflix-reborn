@@ -62,6 +62,12 @@ object HdFullProvider : Provider {
     }
 
     fun clearSessionCookies() {
+        activeSessionCookies = null
+        sessionPrimed = false
+        clearCookieNames(setOf("cf_clearance", "guid", "PHPSESSID"))
+    }
+
+    private fun clearCookieNames(names: Set<String>) {
         val cookieManager = CookieManager.getInstance()
         listOf(
             "https://hdfull.one",
@@ -71,9 +77,9 @@ object HdFullProvider : Provider {
             "https://hdfullcdn.cc",
             "https://www.hdfullcdn.cc",
         ).forEach { url ->
-            cookieManager.setCookie(url, "cf_clearance=; Max-Age=0; path=/")
-            cookieManager.setCookie(url, "guid=; Max-Age=0; path=/")
-            cookieManager.setCookie(url, "PHPSESSID=; Max-Age=0; path=/")
+            names.forEach { name ->
+                cookieManager.setCookie(url, "$name=; Max-Age=0; path=/")
+            }
         }
         cookieManager.flush()
     }
@@ -377,15 +383,6 @@ object HdFullProvider : Provider {
                 return@withLock
             }
 
-            runCatching {
-                execute(
-                    Request.Builder()
-                        .url(targetUrl)
-                        .header("Referer", baseUrl)
-                        .build()
-                )
-            }
-
             if (hasCloudflareClearance(targetUrl) && attemptAutomaticLogin(targetUrl)) {
                 sessionPrimed = hasLoginCookie(targetUrl)
                 if (sessionPrimed) {
@@ -404,14 +401,25 @@ object HdFullProvider : Provider {
                 }
             )
 
-            if (hasCloudflareClearance(targetUrl) && attemptAutomaticLogin(targetUrl)) {
-                sessionPrimed = hasLoginCookie(targetUrl)
-                if (sessionPrimed) {
-                    return@withLock
-                }
+            if (!hasCloudflareClearance(targetUrl)) {
+                sessionPrimed = false
+                throw IllegalStateException("HdFull Cloudflare clearance missing after interactive access")
+            }
+
+            activeSessionCookies = mergeCookieStrings(
+                activeSessionCookies,
+                rawCookieHeader(targetUrl, allowedNames = setOf("guid", "PHPSESSID", "language")),
+            )
+
+            if (!attemptAutomaticLogin(targetUrl)) {
+                sessionPrimed = false
+                throw IllegalStateException("HdFull automatic login failed after Cloudflare access")
             }
 
             sessionPrimed = hasLoginCookie(targetUrl)
+            if (!sessionPrimed) {
+                throw IllegalStateException("HdFull session cookies missing after login")
+            }
         }
     }
 

@@ -373,12 +373,13 @@ class PlayerMobileFragment : Fragment() {
 
                     is PlayerViewModel.State.FailedLoadingVideo -> {
                         val nextServer = servers.getOrNull(servers.indexOf(state.server) + 1)
-                        if (nextServer != null) {
+                        if (nextServer != null && shouldAutoAdvanceServer(state.server)) {
                             viewModel.getVideo(nextServer)
                         } else {
                             val providerName = UserPreferences.currentProvider?.name ?: ""
                             val isTmdb = providerName.contains("TMDb", ignoreCase = true)
                             val isAD = providerName.contains("AfterDark", ignoreCase = true)
+                            val isBrowserGuardedServer = !shouldAutoAdvanceServer(state.server)
 
                             val message = if (isTmdb || isAD) {
                                 val langCode = providerName.substringAfter("(").substringBefore(")")
@@ -387,6 +388,8 @@ class PlayerMobileFragment : Fragment() {
                                     .replaceFirstChar { if (it.isLowerCase()) it.titlecase(Locale.getDefault()) else it.toString() }
                                 if (isTmdb) getString(R.string.player_not_available_lang_message, langDisplayName)
                                 else getString(R.string.player_retry_later_message)
+                            } else if (isBrowserGuardedServer) {
+                                "This server needs manual completion. Pick another server when you're done."
                             } else {
                                 "All servers failed to load the video."
                             }
@@ -396,7 +399,9 @@ class PlayerMobileFragment : Fragment() {
                                 message,
                                 Toast.LENGTH_LONG
                             ).show()
-                            findNavController().navigateUp()
+                            if (!isBrowserGuardedServer) {
+                                findNavController().navigateUp()
+                            }
                         }
                     }
                 }
@@ -560,6 +565,15 @@ class PlayerMobileFragment : Fragment() {
         } catch (ignored: Exception) {}
         _binding = null
         isSetupDone = false
+    }
+
+    private fun shouldAutoAdvanceServer(server: Video.Server): Boolean {
+        val host = runCatching { Uri.parse(server.src).host.orEmpty().lowercase(Locale.ROOT) }
+            .getOrDefault("")
+        return host != "powvideo.org" &&
+            host != "powwideo.org" &&
+            host != "streamplay.to" &&
+            host != "straemplay.org"
     }
 
     fun onBackPressed(): Boolean = when {
