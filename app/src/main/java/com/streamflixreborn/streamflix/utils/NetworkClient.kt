@@ -10,7 +10,7 @@ import okhttp3.Dns
 import okhttp3.HttpUrl
 import okhttp3.OkHttpClient
 import okhttp3.TlsVersion
-import okhttp3.logging.HttpLoggingInterceptor
+import okhttp3.Interceptor
 import java.security.KeyStore
 import java.security.SecureRandom
 import java.security.cert.CertificateFactory
@@ -22,6 +22,9 @@ import javax.net.ssl.X509TrustManager
 import com.streamflixreborn.streamflix.StreamFlixApp
 import com.streamflixreborn.streamflix.R
 import android.os.Build
+import okhttp3.Request
+import okio.Buffer
+import java.util.Locale
 
 object NetworkClient {
 
@@ -41,19 +44,49 @@ object NetworkClient {
         }
 
         override fun loadForRequest(url: HttpUrl): List<Cookie> {
-            val cookieString = cookieManager.getCookie(url.toString()) ?: return emptyList()
-            return cookieString.split(";").mapNotNull {
-                Cookie.parse(url, it.trim())
+            val cookiesByName = linkedMapOf<String, Cookie>()
+            cookieCandidateUrls(url).forEach { candidate ->
+                val cookieString = runCatching { cookieManager.getCookie(candidate) }.getOrNull().orEmpty()
+                cookieString.split(";")
+                    .map { it.trim() }
+                    .filter { it.isNotBlank() }
+                    .mapNotNull { Cookie.parse(url, it) }
+                    .forEach { cookie ->
+                        cookiesByName[cookie.name] = cookie
+                    }
             }
+            return cookiesByName.values.toList()
         }
     }
 
-    private val loggingInterceptor by lazy {
-        HttpLoggingInterceptor { message ->
-            Log.d(TAG, "[OkHttp] $message")
-        }.apply {
-            level = HttpLoggingInterceptor.Level.HEADERS
+    private val loggingInterceptor = Interceptor { chain ->
+        val request = chain.request()
+        val host = request.url.host.lowercase(Locale.ROOT)
+        val shouldLog = host == "hdfull.one" ||
+            host == "www.hdfull.one" ||
+            host == "hdfull.sbs" ||
+            host == "www.hdfull.sbs" ||
+            host == "hdfullcdn.cc" ||
+            host == "www.hdfullcdn.cc"
+
+        if (shouldLog) {
+            Log.d(TAG, "[OkHttp] URL=${request.url}")
+            Log.d(TAG, "[OkHttp] Method=${request.method}")
+            Log.d(TAG, "[OkHttp] Headers=${request.headers}")
+            Log.d(TAG, "[OkHttp] Cookie=${request.header("Cookie").orEmpty()}")
+            Log.d(TAG, "[OkHttp] Body=${requestBodyAsString(request).orEmpty()}")
         }
+
+        val response = chain.proceed(request)
+
+        if (shouldLog) {
+            Log.d(TAG, "[OkHttp] Response code=${response.code}")
+            response.priorResponse?.let { prior ->
+                Log.d(TAG, "[OkHttp] Redirect from=${prior.request.url} to=${response.request.url}")
+            }
+        }
+
+        response
     }
 
     val default: OkHttpClient by lazy { buildClient(DnsResolver.doh) }
@@ -174,5 +207,34 @@ object NetworkClient {
         }
         customizer?.invoke(builder)
         return builder.build()
+    }
+
+    private fun cookieCandidateUrls(url: HttpUrl): List<String> {
+        val exact = url.newBuilder().fragment(null).build().toString()
+        val root = url.newBuilder().encodedPath("/").query(null).fragment(null).build().toString()
+        val host = url.host.lowercase(Locale.ROOT)
+        return if (host == "hdfull.one" || host == "www.hdfull.one" || host == "hdfull.sbs" || host == "www.hdfull.sbs") {
+            listOf(
+                exact,
+                root,
+                "https://hdfull.one/",
+                "https://www.hdfull.one/",
+                "https://hdfull.sbs/",
+                "https://www.hdfull.sbs/",
+            ).distinct()
+        } else {
+            listOf(exact, root).distinct()
+        }
+    }
+
+    private fun requestBodyAsString(request: Request): String? {
+        val body = request.body ?: return null
+        val buffer = Buffer()
+        return try {
+            body.writeTo(buffer)
+            buffer.readUtf8()
+        } catch (error: Exception) {
+            "<unavailable:${error.javaClass.simpleName}>"
+        }
     }
 }

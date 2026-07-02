@@ -23,14 +23,20 @@ import kotlinx.coroutines.async
 import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
-import okhttp3.FormBody
-import okhttp3.HttpUrl.Companion.toHttpUrl
-import okhttp3.Request
 import org.json.JSONArray
 import org.json.JSONObject
 import org.jsoup.Jsoup
 import org.jsoup.nodes.Document
 import java.util.Locale
+import retrofit2.Retrofit
+import retrofit2.converter.scalars.ScalarsConverterFactory
+import retrofit2.http.FieldMap
+import retrofit2.http.FormUrlEncoded
+import retrofit2.http.GET
+import retrofit2.http.HeaderMap
+import retrofit2.http.POST
+import retrofit2.http.Url
+import okhttp3.HttpUrl.Companion.toHttpUrl
 
 object HdFullProvider : Provider {
 
@@ -49,21 +55,44 @@ object HdFullProvider : Provider {
 
     private var webViewResolver: WebViewResolver? = null
     private val authMutex = Mutex()
-    private var sessionPrimed = false
-    private var activeSessionCookies: String? = null
+    private val service by lazy {
+        Retrofit.Builder()
+            .baseUrl("$baseUrl/")
+            .client(NetworkClient.default)
+            .addConverterFactory(ScalarsConverterFactory.create())
+            .build()
+            .create(HdFullService::class.java)
+    }
 
     private class MissingCredentialsException : IllegalStateException(MISSING_CREDENTIALS_MESSAGE)
 
+    private interface HdFullService {
+        @GET
+        suspend fun getHtml(
+            @Url url: String,
+            @HeaderMap headers: Map<String, String>,
+        ): String
+
+        @FormUrlEncoded
+        @POST("buscar")
+        suspend fun search(
+            @FieldMap fields: Map<String, String>,
+            @HeaderMap headers: Map<String, String>,
+        ): String
+
+        @FormUrlEncoded
+        @POST("a/episodes")
+        suspend fun episodes(
+            @FieldMap fields: Map<String, String>,
+            @HeaderMap headers: Map<String, String>,
+        ): String
+    }
+
     fun init(context: Context) {
         webViewResolver = WebViewResolver(context)
-        sessionPrimed = false
-        activeSessionCookies = null
-        clearSessionCookies()
     }
 
     fun clearSessionCookies() {
-        activeSessionCookies = null
-        sessionPrimed = false
         clearCookieNames(setOf("cf_clearance", "guid", "PHPSESSID"))
     }
 
@@ -128,7 +157,7 @@ object HdFullProvider : Provider {
 
     override suspend fun getHome(): List<Category> = coroutineScope {
         ensureStoredCredentials()
-        parseHomeCategories(getDocument(baseUrl))
+        parseHomeCategories(fetchDocument(baseUrl, baseUrl))
     }
 
     override suspend fun search(query: String, page: Int): List<AppAdapter.Item> {
@@ -144,25 +173,19 @@ object HdFullProvider : Provider {
         }
 
         return try {
-            val home = getDocument(baseUrl)
+            val home = fetchDocument(baseUrl, baseUrl)
             val csrf = home.selectFirst("input[name=__csrf_magic]")?.attr("value")
                 ?: throw IllegalStateException("HdFull search csrf missing")
 
-            val body = FormBody.Builder()
-                .add("__csrf_magic", csrf)
-                .add("menu", "search")
-                .add("query", query)
-                .build()
-
-            val request = Request.Builder()
-                .url("$baseUrl/buscar")
-                .post(body)
-                .header("Referer", "$baseUrl")
-                .build()
-
-            val html = execute(request)
-            val doc = Jsoup.parse(html).apply { setBaseUri(baseUrl) }
-            parseCards(doc)
+            val html = service.search(
+                fields = linkedMapOf(
+                    "__csrf_magic" to csrf,
+                    "menu" to "search",
+                    "query" to query,
+                ),
+                headers = searchHeaders("$baseUrl/")
+            )
+            parseSearchResults(html.toDocument(baseUrl))
         } catch (error: MissingCredentialsException) {
             throw error
         } catch (error: Exception) {
@@ -173,7 +196,7 @@ object HdFullProvider : Provider {
 
     override suspend fun getMovies(page: Int): List<Movie> = try {
         val path = if (page <= 1) "/peliculas" else "/peliculas/date/$page"
-        parseCards(getDocument("$baseUrl$path")).filterIsInstance<Movie>()
+        parseCards(fetchDocument("$baseUrl$path", baseUrl), includeEpisodes = false).filterIsInstance<Movie>()
     } catch (error: MissingCredentialsException) {
         throw error
     } catch (error: Exception) {
@@ -183,7 +206,7 @@ object HdFullProvider : Provider {
 
     override suspend fun getTvShows(page: Int): List<TvShow> = try {
         val path = if (page <= 1) "/series" else "/series/date/$page"
-        parseCards(getDocument("$baseUrl$path")).filterIsInstance<TvShow>()
+        parseCards(fetchDocument("$baseUrl$path", baseUrl), includeEpisodes = false).filterIsInstance<TvShow>()
     } catch (error: MissingCredentialsException) {
         throw error
     } catch (error: Exception) {
@@ -192,11 +215,11 @@ object HdFullProvider : Provider {
     }
 
     override suspend fun getMovie(id: String): Movie {
-        val doc = getDocument(mediaUrl(id, isMovie = true))
+        val doc = fetchDocument(mediaUrl(id, isMovie = true), mediaUrl(id, isMovie = true))
         return Movie(
             id = id,
             title = doc.selectFirst("#summary-title")?.text().orEmpty(),
-            overview = doc.selectFirst(".show-overview-text")?.text()?.trim(),
+            overview = extractSynopsis(doc),
             released = extractDetailValue(doc, "Año")?.takeIf { it.isNotBlank() }?.let { "$it-01-01" },
             rating = extractDetailValue(doc, "IMDB Rating")?.toDoubleOrNull(),
             poster = doc.selectFirst(".show-poster img")?.absUrl("src")?.normalizeThumb(),
@@ -207,7 +230,7 @@ object HdFullProvider : Provider {
     }
 
     override suspend fun getTvShow(id: String): TvShow {
-        val doc = getDocument(mediaUrl(id, isMovie = false))
+        val doc = fetchDocument(mediaUrl(id, isMovie = false), mediaUrl(id, isMovie = false))
         val showNumericId = extractShowNumericId(doc).orEmpty()
 
         val poster = doc.selectFirst(".show-poster img")?.absUrl("src")?.normalizeThumb()
@@ -220,7 +243,7 @@ object HdFullProvider : Provider {
                     id = "$id|$showNumericId|$seasonNumber",
                     number = seasonNumber,
                     title = seasonLink.selectFirst("[itemprop='name'], h5")?.text()?.trim().ifNullOrBlank {
-                        seasonLink.text().cleanDisplayText().ifBlank { "Temporada $seasonNumber" }
+                        seasonLink.text().normalizeDisplayText().ifBlank { "Temporada $seasonNumber" }
                     },
                     poster = poster,
                 )
@@ -231,7 +254,7 @@ object HdFullProvider : Provider {
         return TvShow(
             id = id,
             title = doc.selectFirst("#summary-title")?.text().orEmpty(),
-            overview = doc.selectFirst(".show-overview-text")?.text()?.trim(),
+            overview = extractSynopsis(doc),
             released = extractDetailValue(doc, "Año")?.takeIf { it.isNotBlank() }?.let { "$it-01-01" },
             rating = extractDetailValue(doc, "IMDB Rating")?.toDoubleOrNull(),
             poster = poster,
@@ -247,7 +270,7 @@ object HdFullProvider : Provider {
 
         val showSlug = parts[0]
         val showId = parts[1].ifBlank {
-            extractShowNumericId(getDocument(mediaUrl(showSlug, isMovie = false))).orEmpty()
+            extractShowNumericId(fetchDocument(mediaUrl(showSlug, isMovie = false), mediaUrl(showSlug, isMovie = false))).orEmpty()
         }
         val seasonNumber = parts[2].toIntOrNull() ?: return emptyList()
         if (showId.isBlank()) {
@@ -256,22 +279,17 @@ object HdFullProvider : Provider {
         }
 
         return try {
-            val body = FormBody.Builder()
-                .add("action", "season")
-                .add("start", "0")
-                .add("limit", "0")
-                .add("show", showId)
-                .add("season", seasonNumber.toString())
-                .build()
-
-            val request = Request.Builder()
-                .url("$baseUrl/a/episodes")
-                .post(body)
-                .header("Referer", "$baseUrl/serie/$showSlug/temporada-$seasonNumber")
-                .header("X-Requested-With", "XMLHttpRequest")
-                .build()
-
-            val response = execute(request)
+            val response = service.episodes(
+                fields = linkedMapOf(
+                    "action" to "season",
+                    "start" to "0",
+                    "limit" to "0",
+                    "show" to showId,
+                    "season" to seasonNumber.toString(),
+                    "elang" to "ALL",
+                ),
+                headers = episodesHeaders("$baseUrl/serie/$showSlug/temporada-$seasonNumber")
+            )
             val array = JSONArray(response)
             List(array.length()) { index ->
                 array.getJSONObject(index).toEpisode()
@@ -291,7 +309,7 @@ object HdFullProvider : Provider {
             Genre(
                 id = id,
                 name = path.substringAfterLast('/').replace('-', ' ').replaceFirstChar { it.titlecase(Locale.ROOT) },
-                shows = parseCards(getDocument(url)).filterIsInstance<Show>()
+                shows = parseCards(fetchDocument(url, baseUrl), includeEpisodes = false).filterIsInstance<Show>()
             )
         } catch (error: MissingCredentialsException) {
             throw error
@@ -313,7 +331,7 @@ object HdFullProvider : Provider {
                 else -> mediaUrl(id, isMovie = false)
             }
 
-            val doc = getDocument(url)
+            val doc = fetchDocument(url, url)
             val links = decodeLinks(doc)
             links.mapNotNull { link ->
                 val provider = providerMap[link.provider] ?: return@mapNotNull null
@@ -350,93 +368,367 @@ object HdFullProvider : Provider {
         }
     }
 
-    private suspend fun getDocument(url: String): Document {
-        ensureInteractiveAccess(url)
-
-        return try {
-            fetchDocument(url)
-        } catch (error: IllegalStateException) {
-            if (!isAuthFailure(error) || !hasStoredCredentials()) {
-                throw error
-            }
-
-            Log.w(TAG, "Retrying HdFull request after clearing stale session", error)
-            clearSessionCookies()
-            sessionPrimed = false
-            ensureInteractiveAccess(url)
-            fetchDocument(url)
+    private suspend fun ensureAuthenticatedSession(targetUrl: String = baseUrl) {
+        if (hasAuthenticatedCookies(targetUrl)) {
+            return
         }
-    }
 
-    private suspend fun fetchDocument(url: String): Document {
-        val request = Request.Builder()
-            .url(url)
-            .header("Referer", baseUrl)
-            .header("Accept", "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8")
-            .build()
-
-        val html = execute(request)
-        return Jsoup.parse(html).apply { setBaseUri(url) }
-    }
-
-    private suspend fun ensureInteractiveAccess(targetUrl: String) {
         authMutex.withLock {
-            ensureStoredCredentials()
-
-            if (sessionPrimed && hasLoginCookie(targetUrl)) {
+            if (hasAuthenticatedCookies(targetUrl)) {
                 return@withLock
             }
 
-            activeSessionCookies = null
-            sessionPrimed = false
-
-            Log.d(TAG, "Launching interactive WebView for $targetUrl")
+            ensureStoredCredentials()
+            Log.d(TAG, "Opening WebView auth flow for $targetUrl")
             getResolver().get(
                 url = targetUrl,
+                headers = authHeaders(targetUrl),
                 completion = { currentUrl, html, cookies ->
-                    if (cookies.isNotBlank()) {
-                        activeSessionCookies = mergeCookieStrings(activeSessionCookies, cookies)
-                    }
-                    isLoggedIn(currentUrl, html, mergeCookieStrings(activeSessionCookies, cookies))
+                    val logged = isAuthenticatedPage(currentUrl, html, cookies)
+                    Log.d(TAG, "Auth polling -> url=$currentUrl authenticated=$logged cookies=$cookies")
+                    logged
                 },
                 pageReadyScriptProvider = { currentUrl, html, cookies ->
-                    if (!cookies.contains("cf_clearance=")) {
-                        return@get null
+                    if (requiresLoginAutomation(currentUrl, html, cookies)) {
+                        Log.d(TAG, "Auth automation -> login form detected at $currentUrl")
+                        buildLoginAutomationScript()
+                    } else {
+                        null
                     }
-                    if (isLoggedIn(currentUrl, html, mergeCookieStrings(activeSessionCookies, cookies))) {
-                        return@get null
-                    }
-                    if (!requiresInteractiveAccess(currentUrl, html)) {
-                        return@get null
-                    }
-                    buildLoginAutomationScript()
                 }
             )
 
-            if (!hasCloudflareClearance(targetUrl)) {
-                sessionPrimed = false
-                throw IllegalStateException("HdFull Cloudflare clearance missing after interactive access")
-            }
-
-            activeSessionCookies = mergeCookieStrings(
-                activeSessionCookies,
-                rawCookieHeader(targetUrl),
-            )
-
-            if (!hasLoginCookie(targetUrl) && !attemptAutomaticLogin(targetUrl)) {
-                sessionPrimed = false
-                throw IllegalStateException("HdFull automatic login failed after Cloudflare access")
-            }
-
-            sessionPrimed = hasLoginCookie(targetUrl)
-            if (!sessionPrimed) {
-                throw IllegalStateException("HdFull session cookies missing after login")
+            synchronizeCookies()
+            if (!validateAuthenticatedSession(targetUrl)) {
+                Log.w(TAG, "Authenticated session validation failed for $targetUrl")
+                throw IllegalStateException("HdFull authentication did not produce a valid browser session")
             }
         }
+    }
+
+    private suspend fun validateAuthenticatedSession(targetUrl: String): Boolean {
+        return try {
+            val doc = requestDocument(
+                url = targetUrl,
+                referer = targetUrl,
+                headers = pageHeaders(targetUrl, referer = targetUrl),
+                ensureAuth = false,
+                retryOnAuthFailure = false,
+            )
+            val valid = !looksLikeLoginPage(doc, targetUrl)
+            Log.d(TAG, "Session validation -> url=$targetUrl valid=$valid")
+            valid
+        } catch (error: Exception) {
+            Log.w(TAG, "Session validation failed for $targetUrl", error)
+            false
+        }
+    }
+
+    private suspend fun fetchDocument(url: String, referer: String): Document {
+        return requestDocument(
+            url = url,
+            referer = referer,
+            headers = pageHeaders(url, referer),
+        )
+    }
+
+    private suspend fun requestDocument(
+        url: String,
+        referer: String,
+        headers: Map<String, String>,
+        ensureAuth: Boolean = true,
+        retryOnAuthFailure: Boolean = true,
+    ): Document {
+        if (ensureAuth) {
+            ensureAuthenticatedSession(baseUrl)
+        }
+
+        val normalizedUrl = normalizeRequestUrl(url)
+        Log.d(TAG, "HdFull request -> url=$normalizedUrl")
+        Log.d(TAG, "HdFull cookie snapshot -> ${cookieHeaderForLogging(normalizedUrl)}")
+
+        return try {
+            val html = service.getHtml(normalizedUrl, headers)
+            val document = html.toDocument(normalizedUrl)
+            if (looksLikeLoginPage(document, normalizedUrl) || looksLikeCloudflarePage(document, normalizedUrl)) {
+                throw IllegalStateException("HdFull returned a browser-verification page for $normalizedUrl")
+            }
+            document
+        } catch (error: retrofit2.HttpException) {
+            if (error.code() == 403 && retryOnAuthFailure) {
+                Log.w(TAG, "HdFull request returned 403 for $normalizedUrl; refreshing browser session", error)
+                clearSessionCookies()
+                ensureAuthenticatedSession(normalizedUrl)
+                return requestDocument(
+                    url = normalizedUrl,
+                    referer = referer,
+                    headers = headers,
+                    retryOnAuthFailure = false,
+                )
+            }
+            throw error
+        } catch (error: Exception) {
+            if (retryOnAuthFailure && looksLikeAuthFailure(error)) {
+                Log.w(TAG, "HdFull request needs refreshed browser session for $normalizedUrl", error)
+                clearSessionCookies()
+                ensureAuthenticatedSession(normalizedUrl)
+                return requestDocument(
+                    url = normalizedUrl,
+                    referer = referer,
+                    headers = headers,
+                    retryOnAuthFailure = false,
+                )
+            }
+            throw error
+        }
+    }
+
+    private fun synchronizeCookies() {
+        val cookieManager = CookieManager.getInstance()
+        cookieManager.flush()
+        Log.d(TAG, "Cookies synchronized for HDFull hosts")
+        listOf(
+            "https://hdfull.one/",
+            "https://www.hdfull.one/",
+            "https://hdfull.sbs/",
+            "https://www.hdfull.sbs/",
+            "https://hdfullcdn.cc/",
+            "https://www.hdfullcdn.cc/",
+        ).forEach { url ->
+            Log.d(TAG, "Cookies[$url] = ${cookieHeaderForLogging(url)}")
+        }
+    }
+
+    private fun hasAuthenticatedCookies(url: String): Boolean {
+        val cookies = cookieHeaderForLogging(url)
+        return cookies.contains("cf_clearance=") &&
+            cookies.contains("PHPSESSID=") &&
+            cookies.contains("guid=")
+    }
+
+    private fun looksLikeAuthFailure(error: Throwable): Boolean {
+        val message = error.message.orEmpty()
+        return message.contains("403") ||
+            message.contains("login", ignoreCase = true) ||
+            message.contains("cloudflare", ignoreCase = true) ||
+            message.contains("browser-verification", ignoreCase = true) ||
+            message.contains("verification page", ignoreCase = true)
+    }
+
+    private fun authHeaders(referer: String): Map<String, String> {
+        return linkedMapOf(
+            "User-Agent" to NetworkClient.USER_AGENT,
+            "Accept" to "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
+            "Accept-Language" to "es-ES,es;q=0.9,en-US;q=0.8,en;q=0.7",
+            "Accept-Encoding" to "identity",
+            "Referer" to referer,
+            "Origin" to baseUrl,
+        )
+    }
+
+    private fun pageHeaders(url: String, referer: String): Map<String, String> {
+        return linkedMapOf(
+            "User-Agent" to NetworkClient.USER_AGENT,
+            "Accept" to "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
+            "Accept-Language" to "es-ES,es;q=0.9,en-US;q=0.8,en;q=0.7",
+            "Accept-Encoding" to "identity",
+            "Referer" to referer,
+        )
+    }
+
+    private fun searchHeaders(referer: String): Map<String, String> {
+        return linkedMapOf(
+            "User-Agent" to NetworkClient.USER_AGENT,
+            "Accept" to "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
+            "Accept-Language" to "es-ES,es;q=0.9,en-US;q=0.8,en;q=0.7",
+            "Accept-Encoding" to "identity",
+            "Content-Type" to "application/x-www-form-urlencoded",
+            "Referer" to referer,
+            "Origin" to baseUrl,
+        )
+    }
+
+    private fun episodesHeaders(referer: String): Map<String, String> {
+        return linkedMapOf(
+            "User-Agent" to NetworkClient.USER_AGENT,
+            "Accept" to "application/json, text/javascript, */*; q=0.01",
+            "Accept-Language" to "es-ES,es;q=0.9,en-US;q=0.8,en;q=0.7",
+            "Accept-Encoding" to "identity",
+            "Content-Type" to "application/x-www-form-urlencoded",
+            "X-Requested-With" to "XMLHttpRequest",
+            "Origin" to baseUrl,
+            "Referer" to referer,
+        )
+    }
+
+    private fun Document.toDocument(url: String): Document {
+        return this.apply { setBaseUri(url) }
+    }
+
+    private fun String.toDocument(url: String): Document {
+        return Jsoup.parse(this).apply { setBaseUri(url) }
+    }
+
+    private fun looksLikeLoginPage(doc: Document, currentUrl: String): Boolean {
+        val html = doc.outerHtml().lowercase(Locale.ROOT)
+        val url = currentUrl.lowercase(Locale.ROOT)
+        return url.contains("/login") ||
+            html.contains("popup_login_form") ||
+            html.contains("dologin('#popup_login_result')") ||
+            html.contains("name=\"password\"") ||
+            html.contains("name='password'") ||
+            html.contains("login") && html.contains("password")
+    }
+
+    private fun looksLikeCloudflarePage(doc: Document, currentUrl: String): Boolean {
+        val html = doc.outerHtml().lowercase(Locale.ROOT)
+        val url = currentUrl.lowercase(Locale.ROOT)
+        return url.contains("/cdn-cgi/") ||
+            html.contains("just a moment") ||
+            html.contains("cf-browser-verification") ||
+            html.contains("challenge-running") ||
+            html.contains("challenges.cloudflare.com")
+    }
+
+    private fun isAuthenticatedPage(currentUrl: String, html: String, cookies: String): Boolean {
+        val normalizedHtml = html.lowercase(Locale.ROOT)
+        val normalizedUrl = currentUrl.lowercase(Locale.ROOT)
+        return cookies.contains("cf_clearance=") &&
+            cookies.contains("PHPSESSID=") &&
+            cookies.contains("guid=") &&
+            !normalizedUrl.contains("/login") &&
+            !normalizedHtml.contains("popup_login_form") &&
+            !normalizedHtml.contains("challenge-running") &&
+            !normalizedHtml.contains("just a moment")
     }
 
     private fun hasStoredCredentials(): Boolean {
         return storedUsername().isNotBlank() && storedPassword().isNotBlank()
+    }
+
+    private fun requiresLoginAutomation(currentUrl: String, html: String, cookies: String): Boolean {
+        val normalizedUrl = currentUrl.lowercase(Locale.ROOT)
+        val normalizedHtml = html.lowercase(Locale.ROOT)
+        return hasStoredCredentials() &&
+            !cookies.contains("guid=") &&
+            (
+                normalizedUrl.contains("/login") ||
+                    normalizedHtml.contains("popup_login_form") ||
+                    normalizedHtml.contains("popup_login_result") ||
+                    normalizedHtml.contains("dologin(") ||
+                    normalizedHtml.contains("input type=\"password\"") ||
+                    normalizedHtml.contains("input type='password'") ||
+                    normalizedHtml.contains("name=\"password\"") ||
+                    normalizedHtml.contains("name='password'") ||
+                    normalizedHtml.contains("login") && normalizedHtml.contains("password")
+                )
+    }
+
+    private fun buildLoginAutomationScript(): String {
+        val username = JSONObject.quote(storedUsername())
+        val password = JSONObject.quote(storedPassword())
+
+        return """
+            (function() {
+                if (window.__streamflixHdFullLoginSubmitted) return true;
+                window.__streamflixHdFullLoginSubmitted = true;
+
+                const usernameValue = $username;
+                const passwordValue = $password;
+
+                const setValue = (element, value) => {
+                    if (!element) return false;
+                    const setter = Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value')?.set;
+                    if (setter) {
+                        setter.call(element, value);
+                    } else {
+                        element.value = value;
+                    }
+                    element.dispatchEvent(new Event('input', { bubbles: true }));
+                    element.dispatchEvent(new Event('change', { bubbles: true }));
+                    return true;
+                };
+
+                const inputSelectors = [
+                    'input[name="username"]',
+                    'input[name="user"]',
+                    'input[name="email"]',
+                    'input[name*="login"]',
+                    'input[id*="user"]',
+                    'input[id*="login"]',
+                    'input[placeholder*="user"]',
+                    'input[placeholder*="email"]',
+                    'input[type="text"]',
+                    'input[type="email"]'
+                ];
+                const passwordSelectors = [
+                    'input[type="password"]',
+                    'input[name*="pass"]',
+                    'input[id*="pass"]'
+                ];
+
+                const usernameField = document.querySelector(inputSelectors.join(', '));
+                const passwordField = document.querySelector(passwordSelectors.join(', '));
+
+                if (!passwordField) {
+                    window.__streamflixHdFullLoginSubmitted = false;
+                    return false;
+                }
+
+                if (usernameField) {
+                    setValue(usernameField, usernameValue);
+                }
+                setValue(passwordField, passwordValue);
+
+                const clickLogin = () => {
+                    const submitSelectors = [
+                        '#popup_login_form button[type="submit"]',
+                        '#popup_login_form input[type="submit"]',
+                        'button[type="submit"]',
+                        'input[type="submit"]',
+                        'button[name="login"]',
+                        '.btn-login',
+                        '.login-button',
+                        '.popup-login-button'
+                    ];
+
+                    const submitButton = document.querySelector(submitSelectors.join(', '));
+                    if (submitButton) {
+                        submitButton.click();
+                        return true;
+                    }
+
+                    const form = passwordField.form ||
+                        document.querySelector('#popup_login_form form') ||
+                        document.querySelector('form[action*="login" i]') ||
+                        document.querySelector('form');
+
+                    if (!form) return false;
+                    if (typeof form.requestSubmit === 'function') {
+                        form.requestSubmit();
+                    } else {
+                        form.submit();
+                    }
+                    return true;
+                };
+
+                if (typeof window.dologin === 'function') {
+                    try {
+                        window.dologin('#popup_login_result');
+                        return true;
+                    } catch (error) {
+                        console.log('dologin failed', error);
+                    }
+                }
+
+                if (!clickLogin()) {
+                    window.__streamflixHdFullLoginSubmitted = false;
+                    return false;
+                }
+
+                return true;
+            })();
+        """.trimIndent()
     }
 
     private fun storedUsername(): String {
@@ -447,262 +739,74 @@ object HdFullProvider : Provider {
         return UserPreferences.getProviderCache(this, CACHE_PASSWORD)
     }
 
-    private fun hasLoginCookie(url: String): Boolean {
-        val cookies = collectCookies(url)
-        return cookies.contains("guid=") && cookies.contains("cf_clearance=")
-    }
-
-    private fun hasCloudflareClearance(url: String): Boolean {
-        return collectCookies(url).contains("cf_clearance=")
-    }
-
-    private fun requiresInteractiveAccess(currentUrl: String, html: String): Boolean {
-        if (html.isBlank()) return true
-        val lowerHtml = html.lowercase(Locale.ROOT)
-        val lowerUrl = currentUrl.lowercase(Locale.ROOT)
-        return lowerUrl.contains("/login") ||
-            lowerHtml.contains("just a moment") ||
-            lowerHtml.contains("cf-browser-verification") ||
-            lowerHtml.contains("challenge-running") ||
-            lowerHtml.contains("popup_login_form") ||
-            lowerHtml.contains("dologin('#popup_login_result')") ||
-            lowerHtml.contains("name=\"password\"")
-    }
-
-    private fun isCloudflareChallengePage(currentUrl: String, html: String): Boolean {
-        if (html.isBlank()) return true
-        val lowerHtml = html.lowercase(Locale.ROOT)
-        val lowerUrl = currentUrl.lowercase(Locale.ROOT)
-        return lowerUrl.contains("/cdn-cgi/challenge") ||
-            lowerHtml.contains("just a moment") ||
-            lowerHtml.contains("cf-browser-verification") ||
-            lowerHtml.contains("challenge-running") ||
-            lowerHtml.contains("challenges.cloudflare.com") ||
-            lowerHtml.contains("cf-mitigated")
-    }
-
-    private fun isLoggedIn(currentUrl: String, html: String, cookies: String): Boolean {
-        val lowerHtml = html.lowercase(Locale.ROOT)
-        val lowerUrl = currentUrl.lowercase(Locale.ROOT)
-        return cookies.contains("guid=") &&
-            cookies.contains("cf_clearance=") &&
-            !lowerUrl.contains("/login") &&
-            !lowerHtml.contains("popup_login_form") &&
-            !lowerHtml.contains("dologin('#popup_login_result')")
-    }
-
-    private suspend fun execute(request: Request, allowAuthRetry: Boolean = true): String {
-        return try {
-            executeOnce(request)
-        } catch (error: IllegalStateException) {
-            if (!allowAuthRetry || !isAuthFailure(error) || !isHdFullUrl(request.url.toString())) {
-                throw error
-            }
-
-            Log.w(TAG, "Refreshing HdFull clearance after 403 for ${request.url}", error)
-            clearSessionCookies()
-            ensureInteractiveAccess(baseUrl)
-            executeOnce(request)
-        }
-    }
-
-    private fun executeOnce(request: Request): String {
-        val requestWithCookies = request.newBuilder()
-            .header("Cookie", collectCookies(request.url.toString()))
-            .build()
-
-        NetworkClient.default.newCall(requestWithCookies).execute().use { response ->
-            val body = response.body?.string().orEmpty()
-            if (!response.isSuccessful) {
-                throw IllegalStateException("HdFull request failed: ${response.code}")
-            }
-            return body
-        }
-    }
-
-    private fun isAuthFailure(error: IllegalStateException): Boolean {
-        return error.message.orEmpty().contains("HdFull request failed: 403")
-    }
-
     private fun ensureStoredCredentials() {
         if (!hasStoredCredentials()) {
             throw MissingCredentialsException()
         }
     }
 
-    private suspend fun attemptAutomaticLogin(targetUrl: String): Boolean {
-        if (!hasStoredCredentials()) return false
-        val request = buildLoginRequest() ?: return false
+    private fun parseCards(doc: Document, includeEpisodes: Boolean = true): List<AppAdapter.Item> {
+        val items = mutableListOf<AppAdapter.Item>()
+        val seenKeys = linkedSetOf<String>()
 
-        return try {
-            execute(request, allowAuthRetry = false)
-            activeSessionCookies = mergeCookieStrings(
-                activeSessionCookies,
-                rawCookieHeader(targetUrl),
-            )
-            hasLoginCookie(targetUrl)
-        } catch (error: Exception) {
-            Log.w(TAG, "Automatic HdFull login failed", error)
-            false
-        }
-    }
-
-    private fun buildLoginRequest(): Request? {
-        val username = storedUsername()
-        val password = storedPassword()
-
-        if (username.isBlank() || password.isBlank()) {
-            return null
-        }
-
-        val body = FormBody.Builder()
-            .add("username", username)
-            .add("password", password)
-
-        val formBody = body.build()
-
-        return Request.Builder()
-            .url("$baseUrl/a/login")
-            .post(formBody)
-            .header("Referer", "$baseUrl/login")
-            .header("Origin", baseUrl)
-            .header("X-Requested-With", "XMLHttpRequest")
-            .header("Accept", "application/json, text/javascript, */*; q=0.01")
-            .header("Sec-Fetch-Site", "same-origin")
-            .build()
-    }
-
-    private fun buildLoginAutomationScript(): String {
-        val escapedUsername = JSONObject.quote(storedUsername())
-        val escapedPassword = JSONObject.quote(storedPassword())
-        return """
-            (function() {
-                if (window.__streamflixHdFullLoginSubmitted) return "already-submitted";
-                var username = document.querySelector("input[name='username'], input[type='text'], input[type='email']");
-                var password = document.querySelector("input[name='password'], input[type='password']");
-                if (!username || !password) return "missing-fields";
-                username.focus();
-                username.value = $escapedUsername;
-                username.dispatchEvent(new Event('input', { bubbles: true }));
-                username.dispatchEvent(new Event('change', { bubbles: true }));
-                password.focus();
-                password.value = $escapedPassword;
-                password.dispatchEvent(new Event('input', { bubbles: true }));
-                password.dispatchEvent(new Event('change', { bubbles: true }));
-                window.__streamflixHdFullLoginSubmitted = true;
-                if (typeof window.dologin === 'function') {
-                    window.dologin('#popup_login_result');
-                    return "submitted-dologin";
-                }
-                var form = document.querySelector("form[action*='/a/login'], form[id*='login'], form[name*='login'], #popup_login_form form");
-                if (form) {
-                    form.submit();
-                    return "submitted-form";
-                }
-                return "no-submit-path";
-            })();
-        """.trimIndent()
-    }
-
-    private fun parseCards(doc: Document): List<AppAdapter.Item> {
-        val anchors = doc.select(
-            "a[href*='/pelicula/'], a[href*='/serie/'], a[href*='/movie/'], a[href*='/show/']"
-        )
-
-        return anchors.mapNotNull { anchor ->
-            val href = anchor.attr("href").ifBlank { return@mapNotNull null }
-            val absoluteUrl = when {
-                href.startsWith("http") -> href
-                href.startsWith("/") -> "$baseUrl$href"
-                else -> "$baseUrl/$href"
-            }
-            val image = anchor.selectFirst("img")
-            val title = sequenceOf(
-                image?.attr("title"),
-                image?.attr("alt"),
-                image?.attr("original-title"),
-                anchor.attr("title"),
-                anchor.text().trim(),
-            ).firstOrNull { !it.isNullOrBlank() }?.trim() ?: return@mapNotNull null
-            val poster = sequenceOf(
-                image?.absUrl("src"),
-                image?.attr("src"),
-                anchor.attr("data-src"),
-            ).firstOrNull { !it.isNullOrBlank() }?.let { normalizeUrl(it!!) }
-            val rating = anchor.selectFirst(".rating")?.text()
-                ?.replace("\\s+".toRegex(), "")
-                ?.toDoubleOrNull()
-
-            when {
-                href.contains("/pelicula/") -> Movie(
-                    id = absoluteUrl.substringAfter("/pelicula/").substringBefore('?').trimEnd('/'),
-                    title = title,
-                    poster = poster,
-                    rating = rating,
-                )
-                href.contains("/serie/") -> TvShow(
-                    id = absoluteUrl.substringAfter("/serie/").substringBefore('?').substringBefore("/temporada-").trimEnd('/'),
-                    title = title,
-                    poster = poster,
-                    rating = rating,
-                )
-                else -> null
-            }
-        }.distinctBy {
-            when (it) {
-                is Movie -> "m:${it.id}"
-                is TvShow -> "t:${it.id}"
+        doc.select(".home-thumb-item, .view").forEach { card ->
+            val item = parseCard(card, includeEpisodes) ?: return@forEach
+            val key = item.cardKey()
+            if (seenKeys.add(key)) {
+                items.add(item)
             }
         }
+
+        return items
+    }
+
+    private fun parseSearchResults(doc: Document): List<AppAdapter.Item> {
+        return parseCards(doc, includeEpisodes = false)
     }
 
     private fun parseHomeCategories(doc: Document): List<Category> {
-        val cardAnchors = doc.select(
-            "a[href*='/pelicula/'], a[href*='/serie/'], a[href*='/movie/'], a[href*='/show/']"
-        )
+        val headings = doc.select("h3.section-title")
+        val categories = mutableListOf<Category>()
 
-        val groupedBySection = linkedMapOf<String, MutableList<AppAdapter.Item>>()
+        headings.forEach { heading ->
+            val title = heading.cleanSectionTitle()
+            if (title.isBlank()) return@forEach
 
-        cardAnchors.forEach { anchor ->
-            val item = parseCard(anchor) ?: return@forEach
-            val sectionName = anchor.closestSectionTitle()
-            groupedBySection.getOrPut(sectionName) { mutableListOf() }.add(item)
-        }
+            val cards = mutableListOf<AppAdapter.Item>()
+            val seenKeys = linkedSetOf<String>()
+            val container = heading.nextElementSibling()
 
-        return groupedBySection
-            .mapNotNull { (name, items) ->
-                val deduped = items.distinctBy {
-                    when (it) {
-                        is Movie -> "m:${it.id}"
-                        is TvShow -> "t:${it.id}"
-                        else -> it.hashCode().toString()
+            var node = container
+            while (node != null && !node.isSectionHeading()) {
+                node.select(".home-thumb-item, .view").forEach { card ->
+                    val item = parseCard(card, includeEpisodes = true) ?: return@forEach
+                    val key = item.cardKey()
+                    if (seenKeys.add(key)) {
+                        cards.add(item)
                     }
                 }
-                deduped.takeIf { it.isNotEmpty() }?.let { Category(name = name, list = it) }
+                node = node.nextElementSibling()
             }
+
+            if (cards.isNotEmpty()) {
+                categories.add(Category(name = title, list = cards))
+            }
+        }
+
+        return categories
     }
 
-    private fun parseCard(anchor: org.jsoup.nodes.Element): AppAdapter.Item? {
-        val href = anchor.attr("href").ifBlank { return null }
-        val absoluteUrl = when {
-            href.startsWith("http") -> href
-            href.startsWith("/") -> "$baseUrl$href"
-            else -> "$baseUrl/$href"
+    private fun parseCard(card: org.jsoup.nodes.Element, includeEpisodes: Boolean): AppAdapter.Item? {
+        val anchor = card.selectFirst("a[href]") ?: return null
+        val href = anchor.attr("href").trim()
+        if (href.isBlank() || !isInternalContentLink(href)) {
+            return null
         }
-        val image = anchor.selectFirst("img")
-        val title = sequenceOf(
-            image?.attr("title"),
-            image?.attr("alt"),
-            image?.attr("original-title"),
-            anchor.attr("title"),
-            anchor.text().trim(),
-        ).firstOrNull { !it.isNullOrBlank() }?.trim() ?: return null
-        val poster = sequenceOf(
-            image?.absUrl("src"),
-            image?.attr("src"),
-            anchor.attr("data-src"),
-        ).firstOrNull { !it.isNullOrBlank() }?.let { normalizeUrl(it!!) }
-        val rating = anchor.selectFirst(".rating")?.text()
+
+        val absoluteUrl = normalizeUrl(href)
+        val poster = extractPosterUrl(card, anchor)
+        val title = extractCardTitle(card, anchor).ifBlank { absoluteUrl.slugFallbackTitle() }
+        val rating = card.selectFirst(".rating")?.text()
             ?.replace("\\s+".toRegex(), "")
             ?.toDoubleOrNull()
 
@@ -712,15 +816,123 @@ object HdFullProvider : Provider {
                 title = title,
                 poster = poster,
                 rating = rating,
-            )
+            ).apply {
+                itemType = AppAdapter.Type.MOVIE_GRID_MOBILE_ITEM
+            }
+
+            href.contains("/serie/") && href.contains("/episodio-") -> {
+                if (!includeEpisodes) return null
+                parseEpisodeCard(card, anchor, absoluteUrl, title, poster)
+            }
+
             href.contains("/serie/") -> TvShow(
                 id = absoluteUrl.substringAfter("/serie/").substringBefore('?').substringBefore("/temporada-").trimEnd('/'),
                 title = title,
                 poster = poster,
                 rating = rating,
-            )
+            ).apply {
+                itemType = AppAdapter.Type.TV_SHOW_GRID_MOBILE_ITEM
+            }
+
             else -> null
         }
+    }
+
+    private fun parseEpisodeCard(
+        card: org.jsoup.nodes.Element,
+        anchor: org.jsoup.nodes.Element,
+        absoluteUrl: String,
+        fallbackTitle: String,
+        poster: String?
+    ): Episode? {
+        val match = Regex("""/serie/([^/]+)/temporada-(\d+)/episodio-(\d+)""", RegexOption.IGNORE_CASE)
+            .find(absoluteUrl)
+            ?: return null
+
+        val showSlug = match.groupValues.getOrNull(1).orEmpty()
+        val seasonNumber = match.groupValues.getOrNull(2)?.toIntOrNull() ?: return null
+        val episodeNumber = match.groupValues.getOrNull(3)?.toIntOrNull() ?: return null
+        val rawTitle = extractCardTitle(card, anchor).ifBlank { fallbackTitle }
+        val showTitle = rawTitle.showTitleFromEpisodeSlug(showSlug)
+        val episodeTitle = rawTitle.episodeCardTitle(seasonNumber, episodeNumber)
+
+        val tvShow = TvShow(
+            id = showSlug,
+            title = showTitle.ifBlank { showSlug.slugToTitle() },
+            poster = poster,
+        ).apply {
+            itemType = AppAdapter.Type.TV_SHOW_GRID_MOBILE_ITEM
+        }
+
+        val season = Season(
+            id = "$showSlug||$seasonNumber",
+            number = seasonNumber,
+            title = "Temporada $seasonNumber",
+            poster = poster,
+            tvShow = tvShow,
+        ).apply {
+            itemType = AppAdapter.Type.SEASON_MOBILE_ITEM
+        }
+
+        return Episode(
+            id = absoluteUrl,
+            number = episodeNumber,
+            title = episodeTitle.ifBlank { "Episodio $episodeNumber" },
+            poster = poster,
+            tvShow = tvShow,
+            season = season,
+        ).apply {
+            itemType = AppAdapter.Type.EPISODE_MOBILE_ITEM
+        }
+    }
+
+    private fun extractCardTitle(card: org.jsoup.nodes.Element, anchor: org.jsoup.nodes.Element): String {
+        val image = card.selectFirst("img")
+        return sequenceOf(
+            card.selectFirst("meta[itemprop=name]")?.attr("content"),
+            image?.attr("original-title"),
+            image?.attr("alt"),
+            image?.attr("title"),
+            anchor.selectFirst("meta[itemprop=name]")?.attr("content"),
+            anchor.attr("title"),
+            anchor.text(),
+            card.attr("title"),
+        ).firstOrNull { !it.isNullOrBlank() }
+            .orEmpty()
+            .normalizeDisplayText()
+    }
+
+    private fun extractPosterUrl(card: org.jsoup.nodes.Element, anchor: org.jsoup.nodes.Element): String? {
+        val image = card.selectFirst("img")
+        return sequenceOf(
+            image?.absUrl("src"),
+            image?.attr("src"),
+            anchor.attr("data-src"),
+            card.attr("data-src"),
+        ).firstOrNull { !it.isNullOrBlank() }
+            ?.let { normalizeUrl(it) }
+    }
+
+    private fun isInternalContentLink(href: String): Boolean {
+        val normalized = normalizeUrl(href)
+        val host = runCatching { normalized.toHttpUrl().host.lowercase(Locale.ROOT) }.getOrNull().orEmpty()
+        return host == "hdfull.one" ||
+            host == "www.hdfull.one" ||
+            host == "hdfull.sbs" ||
+            host == "www.hdfull.sbs"
+    }
+
+    private fun AppAdapter.Item.cardKey(): String {
+        return when (this) {
+            is Movie -> "movie:${id}"
+            is TvShow -> "tv:${id}"
+            is Episode -> "episode:${id}"
+            else -> hashCode().toString()
+        }
+    }
+
+    private fun org.jsoup.nodes.Element.isSectionHeading(): Boolean {
+        return tagName().equals("h3", ignoreCase = true) && hasClass("section-title")
     }
 
     private fun org.jsoup.nodes.Element.closestSectionTitle(): String {
@@ -742,25 +954,79 @@ object HdFullProvider : Provider {
 
     private fun org.jsoup.nodes.Element.cleanSectionTitle(): String {
         val clone = clone()
-        clone.select("a, button, .more, .see-more, .view-more").remove()
+        clone.select(".see-more, .more, .view-more").remove()
 
         return sequenceOf(
+            clone.selectFirst("a")?.text(),
             clone.ownText(),
             clone.text(),
-        ).map { it.cleanDisplayText() }
-            .firstOrNull { it.isNotBlank() }
+        ).map { it?.normalizeDisplayText() }
+            .firstOrNull { !it.isNullOrBlank() }
             .orEmpty()
     }
 
-    private fun String.cleanDisplayText(): String {
+    private fun String.normalizeDisplayText(): String {
         return replace("""\\[tnr]""".toRegex(), " ")
             .replace("\\s+".toRegex(), " ")
-            .replace("""\bm[aá]s\b.*$""".toRegex(RegexOption.IGNORE_CASE), "")
             .trim()
+    }
+
+    private fun extractSynopsis(doc: Document): String? {
+        val overview = doc.selectFirst(".show-overview-text") ?: return null
+        val synopsis = StringBuilder()
+        for (node in overview.childNodes()) {
+            when (node) {
+                is org.jsoup.nodes.TextNode -> synopsis.append(node.text())
+                is org.jsoup.nodes.Element -> if (node.tagName() == "br") continue else break
+            }
+        }
+        return sequenceOf(
+            synopsis.toString(),
+            overview.ownText(),
+        ).map { it.normalizeDisplayText() }
+            .firstOrNull { it.isNotBlank() }
     }
 
     private inline fun String?.ifNullOrBlank(fallback: () -> String): String {
         return if (this.isNullOrBlank()) fallback() else this
+    }
+
+    private fun String.showTitleFromEpisodeSlug(showSlug: String): String {
+        val normalized = normalizeDisplayText()
+        val stripped = normalized
+            .replace(Regex("""\s+\d+x\d+\s*$""", RegexOption.IGNORE_CASE), "")
+            .replace(Regex("""\s+\d+x\d+$""", RegexOption.IGNORE_CASE), "")
+            .normalizeDisplayText()
+        return stripped.ifBlank { showSlug.slugToTitle() }
+    }
+
+    private fun String.episodeCardTitle(seasonNumber: Int, episodeNumber: Int): String {
+        val normalized = normalizeDisplayText()
+        return if (normalized.matches(Regex("""\d+x\d+""", RegexOption.IGNORE_CASE))) {
+            "S$seasonNumber E$episodeNumber"
+        } else {
+            normalized
+        }
+    }
+
+    private fun String.slugToTitle(): String {
+        return replace('-', ' ')
+            .replace('_', ' ')
+            .replace(Regex("""\s+"""), " ")
+            .trim()
+            .split(' ')
+            .joinToString(" ") { word ->
+                word.lowercase(Locale.ROOT).replaceFirstChar { it.titlecase(Locale.ROOT) }
+            }
+    }
+
+    private fun String.slugFallbackTitle(): String {
+        return substringAfter("/serie/", substringAfterLast('/'))
+            .substringBefore('?')
+            .substringBefore("/temporada-")
+            .substringBefore("/episodio-")
+            .substringAfterLast('/')
+            .slugToTitle()
     }
 
     private fun extractShowNumericId(doc: Document): String? {
@@ -780,63 +1046,72 @@ object HdFullProvider : Provider {
             throw IllegalStateException("HdFull generic resolver depth exceeded for $url")
         }
 
-        val html = execute(
-            Request.Builder()
-                .url(url)
-                .header("Referer", baseUrl)
-                .build()
-        )
-        val document = Jsoup.parse(html).apply { setBaseUri(url) }
+        val requestUrl = normalizeUrl(url)
+        val request = okhttp3.Request.Builder()
+            .url(requestUrl)
+            .header("Referer", baseUrl)
+            .header("User-Agent", NetworkClient.USER_AGENT)
+            .build()
 
-        val nestedUrl = sequenceOf(
-            document.selectFirst("iframe[src]")?.absUrl("src"),
-            document.selectFirst("video[src]")?.absUrl("src"),
-            document.selectFirst("source[src]")?.absUrl("src"),
-            Regex("""(?:file|src|source|url)\s*[:=]\s*['"]([^'"]+)['"]""", RegexOption.IGNORE_CASE)
-                .find(html)
-                ?.groupValues
-                ?.getOrNull(1)
-        ).firstOrNull { it?.isNotBlank() == true }
-
-        if (!nestedUrl.isNullOrBlank() && nestedUrl != url && nestedUrl.startsWith("http")) {
-            if (looksLikeDirectMediaUrl(nestedUrl)) {
-                return directVideo(nestedUrl, url)
+        val response = NetworkClient.default.newCall(request).execute()
+        response.use {
+            val html = it.body?.string().orEmpty()
+            if (!it.isSuccessful) {
+                throw IllegalStateException("Generic resolver request failed: ${it.code}")
             }
-            return try {
-                Extractor.extract(nestedUrl, server)
-            } catch (_: Exception) {
-                resolveGenericVideo(nestedUrl, server, depth + 1)
-            }
-        }
 
-        val mediaUrl = sequenceOf(
-            Regex("""https?://[^"'\s>]+\.(?:m3u8|mp4|m4v|webm|mpd)(?:\?[^"'\s>]*)?""", RegexOption.IGNORE_CASE)
-                .find(html)
-                ?.value,
-            Regex("""https?://[^"'\s>]+""", RegexOption.IGNORE_CASE)
-                .findAll(html)
-                .map { it.value }
-                .firstOrNull { candidate ->
-                    candidate.contains("m3u8", ignoreCase = true) ||
-                        candidate.contains("mp4", ignoreCase = true) ||
-                        candidate.contains("video", ignoreCase = true)
+            val document = html.toDocument(requestUrl)
+
+            val nestedUrl = sequenceOf(
+                document.selectFirst("iframe[src]")?.absUrl("src"),
+                document.selectFirst("video[src]")?.absUrl("src"),
+                document.selectFirst("source[src]")?.absUrl("src"),
+                Regex("""(?:file|src|source|url)\s*[:=]\s*['"]([^'"]+)['"]""", RegexOption.IGNORE_CASE)
+                    .find(html)
+                    ?.groupValues
+                    ?.getOrNull(1)
+            ).firstOrNull { it?.isNotBlank() == true }
+
+            if (!nestedUrl.isNullOrBlank() && nestedUrl != requestUrl && nestedUrl.startsWith("http")) {
+                if (looksLikeDirectMediaUrl(nestedUrl)) {
+                    return directVideo(nestedUrl, requestUrl)
                 }
-        ).firstOrNull { it?.isNotBlank() == true }
+                return try {
+                    Extractor.extract(nestedUrl, server)
+                } catch (_: Exception) {
+                    resolveGenericVideo(nestedUrl, server, depth + 1)
+                }
+            }
 
-        val resolved = mediaUrl?.trim()?.takeIf { it.isNotBlank() }
-            ?: throw IllegalStateException("No generic media url found for $url")
+            val mediaUrl = sequenceOf(
+                Regex("""https?://[^"'\s>]+\.(?:m3u8|mp4|m4v|webm|mpd)(?:\?[^"'\s>]*)?""", RegexOption.IGNORE_CASE)
+                    .find(html)
+                    ?.value,
+                Regex("""https?://[^"'\s>]+""", RegexOption.IGNORE_CASE)
+                    .findAll(html)
+                    .map { it.value }
+                    .firstOrNull { candidate ->
+                        candidate.contains("m3u8", ignoreCase = true) ||
+                            candidate.contains("mp4", ignoreCase = true) ||
+                            candidate.contains("video", ignoreCase = true)
+                    }
+            ).firstOrNull { it?.isNotBlank() == true }
 
-        return if (looksLikeDirectMediaUrl(resolved)) {
-            directVideo(resolved, url)
-        } else {
-            Video(
-                source = resolved,
-                headers = mapOf(
-                    "Referer" to url,
-                    "User-Agent" to NetworkClient.USER_AGENT
-                ),
-                extraBuffering = true
-            )
+            val resolved = mediaUrl?.trim()?.takeIf { it.isNotBlank() }
+                ?: throw IllegalStateException("No generic media url found for $requestUrl")
+
+            return if (looksLikeDirectMediaUrl(resolved)) {
+                directVideo(resolved, requestUrl)
+            } else {
+                Video(
+                    source = resolved,
+                    headers = mapOf(
+                        "Referer" to requestUrl,
+                        "User-Agent" to NetworkClient.USER_AGENT
+                    ),
+                    extraBuffering = true
+                )
+            }
         }
     }
 
@@ -868,7 +1143,8 @@ object HdFullProvider : Provider {
             paragraph.children()
                 .drop(1)
                 .joinToString(" ") { it.text().trim() }
-                .ifBlank { paragraph.ownText().trim() }
+                .normalizeDisplayText()
+                .ifBlank { paragraph.ownText().normalizeDisplayText() }
                 .ifBlank { null }
         }
     }
@@ -972,81 +1248,33 @@ object HdFullProvider : Provider {
         }
     }
 
-    private fun collectCookies(url: String): String {
-        val normalizedUrl = normalizeRequestUrl(url)
-        if (isHdFullUrl(normalizedUrl)) {
-            val liveCookies = rawCookieHeader(normalizedUrl)
-            activeSessionCookies = mergeCookieStrings(activeSessionCookies, liveCookies)
-            return activeSessionCookies.orEmpty()
-        }
-
-        val candidates = linkedSetOf<String>()
-        val normalizedBase = normalizeRequestUrl(baseUrl)
-        val alternateHost = if (normalizedUrl.contains("hdfull.one")) {
-            "https://hdfull.sbs/"
+    private fun cookieHeaderForLogging(url: String): String {
+        val cookieManager = CookieManager.getInstance()
+        val host = runCatching { normalizeUrl(url).toHttpUrl().host.lowercase(Locale.ROOT) }.getOrNull().orEmpty()
+        val candidates = if (host == "hdfull.one" || host == "www.hdfull.one" || host == "hdfull.sbs" || host == "www.hdfull.sbs") {
+            listOf(
+                normalizeRequestUrl(url),
+                "https://hdfull.one/",
+                "https://www.hdfull.one/",
+                "https://hdfull.sbs/",
+                "https://www.hdfull.sbs/",
+            )
         } else {
-            "https://hdfull.one/"
+            listOf(normalizeRequestUrl(url))
         }
 
-        val cookieManager = android.webkit.CookieManager.getInstance()
-        listOf(normalizedUrl, normalizedBase, alternateHost).forEach { candidate ->
-            runCatching { cookieManager.getCookie(candidate) }
-                .getOrNull()
-                ?.split(";")
-                ?.map { it.trim() }
-                ?.filter { it.isNotBlank() }
-                ?.forEach { candidates.add(it) }
-        }
-
-        return candidates.joinToString("; ")
-    }
-
-    private fun rawCookieHeader(url: String, allowedNames: Set<String>? = null): String {
-        val cookieManager = android.webkit.CookieManager.getInstance()
-        val candidates = linkedSetOf<String>()
-        val normalizedUrl = normalizeRequestUrl(url)
-        val normalizedBase = normalizeRequestUrl(baseUrl)
-        val alternateHost = if (normalizedUrl.contains("hdfull.one")) {
-            "https://hdfull.sbs/"
-        } else {
-            "https://hdfull.one/"
-        }
-
-        listOf(normalizedUrl, normalizedBase, alternateHost).forEach { candidate ->
-            runCatching { cookieManager.getCookie(candidate) }
-                .getOrNull()
-                ?.split(";")
-                ?.map { it.trim() }
-                ?.filter { it.isNotBlank() }
-                ?.filter { cookie ->
-                    val cookieName = cookie.substringBefore("=", cookie)
-                    allowedNames?.contains(cookieName) != false
-                }
-                ?.forEach { candidates.add(it) }
-        }
-
-        return candidates.joinToString("; ")
-    }
-
-    private fun isHdFullUrl(url: String): Boolean {
-        val host = runCatching { url.toHttpUrl().host }.getOrNull().orEmpty()
-        return host == "hdfull.one" || host == "www.hdfull.one" || host == "hdfull.sbs" || host == "www.hdfull.sbs"
-    }
-
-    private fun mergeCookieStrings(vararg cookieStrings: String?): String {
         val cookiesByName = linkedMapOf<String, String>()
-
-        cookieStrings.forEach { cookieString ->
-            cookieString.orEmpty()
-                .split(";")
-                .map { it.trim() }
-                .filter { it.isNotBlank() }
-                .forEach { cookie ->
+        candidates.forEach { candidate ->
+            runCatching { cookieManager.getCookie(candidate) }
+                .getOrNull()
+                ?.split(";")
+                ?.map { it.trim() }
+                ?.filter { it.isNotBlank() }
+                ?.forEach { cookie ->
                     val cookieName = cookie.substringBefore("=", cookie)
                     cookiesByName[cookieName] = cookie
                 }
         }
-
         return cookiesByName.values.joinToString("; ")
     }
 
