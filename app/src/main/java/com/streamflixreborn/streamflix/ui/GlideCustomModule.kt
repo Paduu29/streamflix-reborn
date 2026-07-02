@@ -24,16 +24,16 @@ import javax.net.ssl.X509TrustManager
 class GlideCustomModule : AppGlideModule() {
     private companion object {
         private const val HDFULL_CDN_USER_AGENT =
-            "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/149.0.0.0 Safari/537.36"
+            "Mozilla/5.0 (Linux; Android 13; Pixel 7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/116.0.0.0 Mobile Safari/537.36"
         private const val HDFULL_CDN_ACCEPT =
-            "text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,image/apng,*/*;q=0.8,application/signed-exchange;v=b3;q=0.7"
+            "image/avif,image/webp,image/apng,image/svg+xml,image/*,*/*;q=0.8"
         private const val HDFULL_CDN_ACCEPT_LANGUAGE =
-            "de-DE,de;q=0.9,en-US;q=0.8,en;q=0.7"
+            "es-ES,es;q=0.9,en-US;q=0.8,en;q=0.7"
         private const val HDFULL_CDN_REFERER = "https://hdfull.one/"
         private const val HDFULL_CDN_SEC_CH_UA =
-            "\"Google Chrome\";v=\"149\", \"Chromium\";v=\"149\", \"Not)A;Brand\";v=\"24\""
-        private const val HDFULL_CDN_SEC_CH_UA_MOBILE = "?0"
-        private const val HDFULL_CDN_SEC_CH_UA_PLATFORM = "\"macOS\""
+            "\"Not/A)Brand\";v=\"99\", \"Google Chrome\";v=\"116\", \"Chromium\";v=\"116\""
+        private const val HDFULL_CDN_SEC_CH_UA_MOBILE = "?1"
+        private const val HDFULL_CDN_SEC_CH_UA_PLATFORM = "\"Android\""
         private const val HDFULL_CDN_PRIORITY = "u=0, i"
     }
 
@@ -59,6 +59,9 @@ class GlideCustomModule : AppGlideModule() {
                 val original = chain.request()
                 val requestBuilder = original.newBuilder()
                 val host = original.url.host.lowercase(Locale.ROOT)
+                val isHdFullCdn = host.contains("hdfullcdn.cc")
+                val isHdFullOne = host.contains("hdfull.one") || host.contains("hdfull.sbs")
+
                 if (original.header("User-Agent") == null) {
                     requestBuilder.header("User-Agent", NetworkClient.USER_AGENT)
                 }
@@ -68,11 +71,11 @@ class GlideCustomModule : AppGlideModule() {
                 if (original.header("Accept-Language") == null) {
                     requestBuilder.header(
                         "Accept-Language",
-                        if (host.contains("hdfullcdn.cc")) HDFULL_CDN_ACCEPT_LANGUAGE
+                        if (isHdFullCdn || isHdFullOne) HDFULL_CDN_ACCEPT_LANGUAGE
                         else "it-IT,it;q=0.9,en-US;q=0.8,en;q=0.7"
                     )
                 }
-                if (host.contains("hdfullcdn.cc")) {
+                if (isHdFullCdn || isHdFullOne) {
                     requestBuilder.header("User-Agent", HDFULL_CDN_USER_AGENT)
                     requestBuilder.header("Accept", HDFULL_CDN_ACCEPT)
                     requestBuilder.header("Referer", HDFULL_CDN_REFERER)
@@ -80,7 +83,17 @@ class GlideCustomModule : AppGlideModule() {
                     requestBuilder.header("Sec-CH-UA", HDFULL_CDN_SEC_CH_UA)
                     requestBuilder.header("Sec-CH-UA-Mobile", HDFULL_CDN_SEC_CH_UA_MOBILE)
                     requestBuilder.header("Sec-CH-UA-Platform", HDFULL_CDN_SEC_CH_UA_PLATFORM)
+                    requestBuilder.removeHeader("Upgrade-Insecure-Requests")
 
+                    if (isHdFullOne) {
+                        requestBuilder.header("Sec-Fetch-Dest", "image")
+                        requestBuilder.header("Sec-Fetch-Mode", "no-cors")
+                        requestBuilder.header("Sec-Fetch-Site", "same-origin")
+                    } else if (isHdFullCdn) {
+                        requestBuilder.header("Sec-Fetch-Dest", "image")
+                        requestBuilder.header("Sec-Fetch-Mode", "no-cors")
+                        requestBuilder.header("Sec-Fetch-Site", "cross-site")
+                    }
                 }
                 chain.proceed(requestBuilder.build())
             }
@@ -104,16 +117,10 @@ class GlideCustomModule : AppGlideModule() {
 
     private val imageCookieJar = object : CookieJar {
         override fun saveFromResponse(url: HttpUrl, cookies: List<Cookie>) {
-            if (url.host.endsWith("hdfullcdn.cc")) {
-                return
-            }
             NetworkClient.cookieJar.saveFromResponse(url, cookies)
         }
 
         override fun loadForRequest(url: HttpUrl): List<Cookie> {
-            if (url.host.endsWith("hdfullcdn.cc")) {
-                return emptyList()
-            }
             return NetworkClient.cookieJar.loadForRequest(url)
         }
     }

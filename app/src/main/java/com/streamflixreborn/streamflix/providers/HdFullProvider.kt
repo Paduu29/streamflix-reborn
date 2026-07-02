@@ -910,7 +910,7 @@ object HdFullProvider : Provider {
             anchor.attr("data-src"),
             card.attr("data-src"),
         ).firstOrNull { !it.isNullOrBlank() }
-            ?.let { normalizeUrl(it) }
+            ?.let { it.normalizeThumb() }
     }
 
     private fun isInternalContentLink(href: String): Boolean {
@@ -1237,7 +1237,7 @@ object HdFullProvider : Provider {
     private fun String.normalizeThumb(): String = when {
         startsWith("http://") || startsWith("https://") -> this
         startsWith("/") -> "$baseUrl$this"
-        else -> this
+        else -> thumbnailUrl(this) ?: this
     }
 
     private fun normalizeUrl(url: String): String {
