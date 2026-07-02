@@ -822,7 +822,16 @@ object HdFullProvider : Provider {
 
             href.contains("/serie/") && href.contains("/episodio-") -> {
                 if (!includeEpisodes) return null
-                parseEpisodeCard(card, anchor, absoluteUrl, title, poster)
+                val item = parseEpisodeCard(card, anchor, absoluteUrl, title, poster)
+                if (item != null) {
+                    TvShow(
+                        id = item.tvShow?.id ?: "",
+                        title = item.tvShow?.title ?: "",
+                        poster = item.poster ?: item.tvShow?.poster,
+                    ).apply {
+                        itemType = AppAdapter.Type.TV_SHOW_GRID_MOBILE_ITEM
+                    }
+                } else null
             }
 
             href.contains("/serie/") -> TvShow(

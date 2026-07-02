@@ -54,7 +54,7 @@ class Episode(
 
 
     @Ignore
-    override var itemType: AppAdapter.Type = AppAdapter.Type.EPISODE_MOBILE_ITEM
+    override lateinit var itemType: AppAdapter.Type
 
     fun copy(
         id: String = this.id,
