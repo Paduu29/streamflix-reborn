@@ -439,6 +439,10 @@ object UserPreferences {
             Key.FAVORITE_PROVIDERS.setStringSet(value)
         }
 
+    var preferredSubtitleLanguage: String?
+        get() = Key.PREFERRED_SUBTITLE_LANGUAGE.getString()
+        set(value) = Key.PREFERRED_SUBTITLE_LANGUAGE.setString(value)
+
     private enum class Key {
         APP_LAYOUT,
         CURRENT_LANGUAGE,
@@ -481,7 +485,9 @@ object UserPreferences {
         BYPASS_WS_ADVERTISED_HOST,
         UPDATE_CHECK_ENABLED,
         PROVIDER_LANGUAGE,
-        FAVORITE_PROVIDERS;
+        FAVORITE_PROVIDERS,
+
+        PREFERRED_SUBTITLE_LANGUAGE;
 
         fun getStringSet(): Set<String>? = when {
             prefs.contains(name) -> prefs.getStringSet(name, null)
