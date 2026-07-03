@@ -167,9 +167,6 @@ object HdFullProvider : Provider {
         ensureStoredCredentials()
         retryWithAuthRecovery(baseUrl, recoveryKindForPath(baseUrl)) {
             val doc = fetchDocument(baseUrl, baseUrl)
-            if (looksLikeLoginPage(doc, baseUrl) || looksLikeCloudflarePage(doc, baseUrl)) {
-                throw IllegalStateException("HdFull returned an authentication page for $baseUrl")
-            }
             parseHomeCategories(doc)
         }
     }
@@ -201,9 +198,6 @@ object HdFullProvider : Provider {
                     headers = searchHeaders("$baseUrl/")
                 )
                 val doc = html.toDocument(baseUrl)
-                if (looksLikeLoginPage(doc, baseUrl) || looksLikeCloudflarePage(doc, baseUrl)) {
-                    throw IllegalStateException("HdFull search returned an authentication page for $baseUrl")
-                }
                 parseSearchResults(doc)
             }
         } catch (error: MissingCredentialsException) {
@@ -218,9 +212,6 @@ object HdFullProvider : Provider {
         val path = if (page <= 1) "/peliculas" else "/peliculas/date/$page"
         retryWithAuthRecovery("$baseUrl$path", recoveryKindForPath("$baseUrl$path")) {
             val doc = fetchDocument("$baseUrl$path", baseUrl)
-            if (looksLikeLoginPage(doc, "$baseUrl$path") || looksLikeCloudflarePage(doc, "$baseUrl$path")) {
-                throw IllegalStateException("HdFull returned an authentication page for $baseUrl$path")
-            }
             parseCards(doc, includeEpisodes = false).filterIsInstance<Movie>()
         }
     } catch (error: MissingCredentialsException) {
@@ -234,9 +225,6 @@ object HdFullProvider : Provider {
         val path = if (page <= 1) "/series" else "/series/date/$page"
         retryWithAuthRecovery("$baseUrl$path", recoveryKindForPath("$baseUrl$path")) {
             val doc = fetchDocument("$baseUrl$path", baseUrl)
-            if (looksLikeLoginPage(doc, "$baseUrl$path") || looksLikeCloudflarePage(doc, "$baseUrl$path")) {
-                throw IllegalStateException("HdFull returned an authentication page for $baseUrl$path")
-            }
             parseCards(doc, includeEpisodes = false).filterIsInstance<TvShow>()
         }
     } catch (error: MissingCredentialsException) {
@@ -342,9 +330,6 @@ object HdFullProvider : Provider {
         return try {
             retryWithAuthRecovery(url, recoveryKindForPath(url)) {
                 val doc = fetchDocument(url, baseUrl)
-                if (looksLikeLoginPage(doc, url) || looksLikeCloudflarePage(doc, url)) {
-                    throw IllegalStateException("HdFull returned an authentication page for $url")
-                }
                 Genre(
                     id = id,
                     name = path.substringAfterLast('/').replace('-', ' ').replaceFirstChar { it.titlecase(Locale.ROOT) },
@@ -373,9 +358,6 @@ object HdFullProvider : Provider {
 
             val doc = retryWithAuthRecovery(url, recoveryKindForPath(url)) {
                 val document = fetchDocument(url, url)
-                if (looksLikeLoginPage(document, url) || looksLikeCloudflarePage(document, url)) {
-                    throw IllegalStateException("HdFull returned an authentication page for $url")
-                }
                 document
             }
             val links = decodeLinks(doc)
@@ -849,8 +831,7 @@ object HdFullProvider : Provider {
             normalizedHtml.contains("popup_login_form") ||
             normalizedHtml.contains("dologin('#popup_login_result')") ||
             normalizedHtml.contains("name=\"password\"") ||
-            normalizedHtml.contains("name='password'") ||
-            normalizedHtml.contains("login") && normalizedHtml.contains("password")
+            normalizedHtml.contains("name='password'")
     }
 
     private fun looksLikeCloudflarePage(doc: Document, currentUrl: String): Boolean {
