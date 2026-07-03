@@ -492,6 +492,9 @@ class PlayerTvFragment : Fragment() {
                                 )
                                 UserPreferences.subtitleName =
                                     (state.subtitle.languageName ?: fileName).substringBefore(" ")
+                                state.subtitle.languageName?.let { lang ->
+                                    UserPreferences.preferredSubtitleLanguage = lang
+                                }
                                 player.seekTo(currentPosition)
                                 player.play()
                             }
@@ -549,6 +552,10 @@ class PlayerTvFragment : Fragment() {
                                 UserPreferences.subtitleName =
                                     (state.subtitle.releaseName ?: state.subtitle.name
                                     ?: fileName).substringBefore(" ")
+                                val subDLLang = state.subtitle.lang ?: state.subtitle.language
+                                if (subDLLang != null) {
+                                    UserPreferences.preferredSubtitleLanguage = subDLLang
+                                }
                                 player.seekTo(currentPosition)
                                 player.play()
                             }
@@ -1179,8 +1186,31 @@ class PlayerTvFragment : Fragment() {
                     super.onPlaybackStateChanged(playbackState)
 
                     if (playbackState == Player.STATE_READY) {
+                        if (!::player.isInitialized) return
+
                         binding.pvPlayer.controller.binding.exoPlayPause.nextFocusDownId = -1
-                        val videoFormat = player.videoFormat
+
+                        val preferredSubLang = UserPreferences.preferredSubtitleLanguage
+                        if (!preferredSubLang.isNullOrEmpty()) {
+                            val trackGroups = player.currentTracks.groups.filter { it.type == C.TRACK_TYPE_TEXT }
+                            for (group in trackGroups) {
+                                for (i in 0 until group.length) {
+                                    val format = group.getTrackFormat(i)
+                                    if (format.language.equals(preferredSubLang, ignoreCase = true)) {
+                                        player.trackSelectionParameters = player.trackSelectionParameters.buildUpon()
+                                            .setOverrideForType(
+                                                androidx.media3.common.TrackSelectionOverride(
+                                                    group.mediaTrackGroup,
+                                                    i
+                                                )
+                                            )
+                                            .build()
+                                        return
+                                    }
+                                }
+                            }
+                        }
+                        player.play()
                         updatePlayerScale()
                     }
                 }
@@ -1189,6 +1219,17 @@ class PlayerTvFragment : Fragment() {
                     super.onTracksChanged(tracks)
                     val videoGroups = tracks.groups.filter { it.type == C.TRACK_TYPE_VIDEO }
                     val videoTracks = videoGroups.sumOf { it.length }
+                    val textGroups = tracks.groups.filter { it.type == C.TRACK_TYPE_TEXT }
+                    for (group in textGroups) {
+                        for (i in 0 until group.length) {
+                            if (group.isTrackSelected(i)) {
+                                val lang = group.getTrackFormat(i).language
+                                if (!lang.isNullOrBlank() && lang != "und" && UserPreferences.preferredSubtitleLanguage != lang) {
+                                    UserPreferences.preferredSubtitleLanguage = lang
+                                }
+                            }
+                        }
+                    }
                     val selectedHeights = buildList {
                         videoGroups.forEach { group ->
                             for (i in 0 until group.length) {
