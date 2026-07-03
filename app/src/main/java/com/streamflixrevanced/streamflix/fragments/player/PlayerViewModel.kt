@@ -16,6 +16,7 @@ import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.MutableSharedFlow
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharedFlow
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import com.streamflixrevanced.streamflix.utils.SubDL
 
@@ -119,7 +120,7 @@ class PlayerViewModel(
         Log.d("PlayerViewModel", "Inizio estrazione video dal server: ${server.name}")
         _state.emit(State.LoadingVideo(server))
         try {
-            val video = UserPreferences.currentProvider!!.getVideo(server)
+            val video = loadVideo(server)
             if (video.source.isEmpty()) throw Exception("No source found")
 
             // LOGICA SOTTOTITOLI GLOBALE: 
@@ -143,6 +144,46 @@ class PlayerViewModel(
             Log.e("PlayerViewModel", "Errore estrazione video: ", e)
             _state.emit(State.FailedLoadingVideo(e, server))
         }
+    }
+
+    private suspend fun loadVideo(server: Video.Server): Video {
+        val provider = UserPreferences.currentProvider!!
+        val firstAttempt = runCatching { provider.getVideo(server) }
+        val firstVideo = firstAttempt.getOrNull()
+        if (firstVideo != null && firstVideo.source.isNotBlank()) {
+            return firstVideo
+        }
+
+        if (!isBrowserGuardedServer(server)) {
+            return firstAttempt.getOrThrow()
+        }
+
+        Log.w(
+            "PlayerViewModel",
+            "Retrying browser-guarded server after failure: ${server.name}",
+            firstAttempt.exceptionOrNull()
+        )
+        delay(750)
+        val secondVideo = provider.getVideo(server)
+        if (secondVideo.source.isBlank()) {
+            throw IllegalStateException("No source found")
+        }
+        return secondVideo
+    }
+
+    private fun isBrowserGuardedServer(server: Video.Server): Boolean {
+        val host = runCatching { Uri.parse(server.src).host.orEmpty().lowercase() }.getOrDefault("")
+        return host == "powvideo.org" ||
+            host == "powwideo.org" ||
+            host == "streamplay.to" ||
+            host == "straemplay.org" ||
+            host == "filemoon.site" ||
+            host == "filemoon.sx" ||
+            host == "megacloud.blog" ||
+            host == "videostr.net" ||
+            host == "vidguard.to" ||
+            host == "rabbitstream.net" ||
+            host == "dokicloud.one"
     }
 
     fun getSubtitles(videoType: Video.Type) = viewModelScope.launch(Dispatchers.IO) {

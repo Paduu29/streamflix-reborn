@@ -38,6 +38,7 @@ class WebViewResolver(private val context: Context) {
     data class Result(
         val html: String,
         val evaluatedValue: String? = null,
+        val finalUrl: String? = null,
     )
 
     private var webView: WebView? = null
@@ -91,7 +92,10 @@ class WebViewResolver(private val context: Context) {
             }
         }
         if (result == null) Log.e(TAG, "[WebView] Global Timeout for $url")
-        return@withLock result ?: Result("<html><body>Timeout</body></html>")
+        return@withLock result ?: Result(
+            html = "<html><body>Timeout</body></html>",
+            finalUrl = url,
+        )
     }
 
     @SuppressLint("SetJavaScriptEnabled")
@@ -230,7 +234,7 @@ class WebViewResolver(private val context: Context) {
                 Log.d(TAG, "[WebView] SUCCESS detected! Closing bypass.")
                 cookieManager.flush()
                 if (continuation.isActive) {
-                    finalizeResult(view, cleanHtml, valueScript, continuation)
+                    finalizeResult(view, cleanHtml, currentUrl, valueScript, continuation)
                 }
                 return@evaluateJavascript
             }
@@ -248,7 +252,7 @@ class WebViewResolver(private val context: Context) {
                 }, 2000)
             } else {
                 Log.w(TAG, "[WebView] Max polling reached")
-                if (continuation.isActive) finalizeResult(view, cleanHtml, valueScript, continuation)
+                if (continuation.isActive) finalizeResult(view, cleanHtml, currentUrl, valueScript, continuation)
             }
         }
     }
@@ -256,18 +260,30 @@ class WebViewResolver(private val context: Context) {
     private fun finalizeResult(
         view: WebView?,
         html: String,
+        finalUrl: String?,
         valueScript: String?,
         continuation: kotlinx.coroutines.CancellableContinuation<Result>,
     ) {
         if (valueScript.isNullOrBlank() || view == null) {
-            continuation.resume(Result(html = "<html>$html</html>"))
+            continuation.resume(
+                Result(
+                    html = "<html>$html</html>",
+                    finalUrl = finalUrl,
+                )
+            )
             cleanup()
             return
         }
 
         view.evaluateJavascript(valueScript) { evaluated ->
             if (continuation.isActive) {
-                continuation.resume(Result(html = "<html>$html</html>", evaluatedValue = evaluated?.trim()))
+                continuation.resume(
+                    Result(
+                        html = "<html>$html</html>",
+                        evaluatedValue = evaluated?.trim(),
+                        finalUrl = finalUrl,
+                    )
+                )
             }
             cleanup()
         }
@@ -356,7 +372,12 @@ class WebViewResolver(private val context: Context) {
                     .setOnCancelListener {
                         Log.d(TAG, "[WebView] Challenge cancelled by user")
                         if (continuation.isActive) {
-                            continuation.resume(Result("<html><body>User cancelled</body></html>"))
+                            continuation.resume(
+                                Result(
+                                    html = "<html><body>User cancelled</body></html>",
+                                    finalUrl = deferredLoadUrl ?: webView?.url,
+                                )
+                            )
                         }
                         cleanup()
                     }

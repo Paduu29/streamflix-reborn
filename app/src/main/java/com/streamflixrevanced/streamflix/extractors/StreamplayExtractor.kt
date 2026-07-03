@@ -28,7 +28,11 @@ class StreamplayExtractor : Extractor() {
             valueScript = PLAYER_STATE_SCRIPT
         )
 
-        return extractVideo(result.html, link, decodeJsValue(result.evaluatedValue))
+        return extractVideo(
+            html = result.html,
+            requestedUrl = result.finalUrl ?: link,
+            playerState = decodeJsValue(result.evaluatedValue),
+        )
     }
 
     private fun extractVideo(html: String, requestedUrl: String, playerState: String?): Video {
