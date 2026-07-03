@@ -20,7 +20,7 @@ dependencies {
 }
 
 android {
-    namespace 'com.streamflixreborn.streamflix'
+    namespace 'com.streamflixrevanced.streamflix'
     compileSdk 36
 
     def properties = new Properties()
