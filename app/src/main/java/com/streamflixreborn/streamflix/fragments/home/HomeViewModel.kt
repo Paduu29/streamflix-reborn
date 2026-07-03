@@ -33,6 +33,7 @@ import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.emitAll
 import kotlinx.coroutines.flow.first
+import kotlinx.coroutines.flow.distinctUntilChanged
 import kotlinx.coroutines.flow.flowOn
 import kotlinx.coroutines.flow.transformLatest
 import kotlinx.coroutines.launch
@@ -192,10 +193,8 @@ class HomeViewModel(database: AppDatabase) : ViewModel() {
         }.flowOn(Dispatchers.IO),
 
         ) { state, continueWatching, favoritesMovies, favoriteTvShows, moviesDb, tvShowsDb ->
-
         when (state) {
             is State.SuccessLoading -> {
-
                 val moviesMap = moviesDb.associateBy { it.id }
                 val tvShowsMap = tvShowsDb.associateBy { it.id }
 
@@ -216,7 +215,6 @@ class HomeViewModel(database: AppDatabase) : ViewModel() {
                 }
 
                 val categories = ParentalControlUtils.filterCategories(listOfNotNull(
-
                     // FEATURED
                     state.categories
                         .find { it.name == Category.FEATURED }
@@ -284,7 +282,7 @@ class HomeViewModel(database: AppDatabase) : ViewModel() {
 
             else -> state
         }
-    }.flowOn(Dispatchers.IO)
+    }.distinctUntilChanged().flowOn(Dispatchers.IO)
 
     sealed class State {
         data object Loading : State()
