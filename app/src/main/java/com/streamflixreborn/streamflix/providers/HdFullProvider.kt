@@ -472,7 +472,7 @@ object HdFullProvider : Provider {
 
                 Log.w(TAG, "Auth issue detected -> kind=$recoveryKind url=$normalizedUrl")
                 Log.d(TAG, "Retry started -> url=$normalizedUrl kind=$recoveryKind")
-                ChallengeManager.ensureAuthenticated(normalizedUrl, recoveryKind)
+                ChallengeManager.ensureAuthenticated(recoveryLandingUrl(normalizedUrl, recoveryKind), recoveryKind)
                 val retried = requestDocument(
                     url = normalizedUrl,
                     referer = referer,
@@ -490,7 +490,7 @@ object HdFullProvider : Provider {
                 val kind = if (hasLoginSessionOnUrl(normalizedUrl)) RecoveryKind.CHALLENGE else RecoveryKind.LOGIN
                 Log.w(TAG, "HdFull request needs browser recovery -> kind=$kind url=$normalizedUrl", error)
                 Log.d(TAG, "Retry started -> url=$normalizedUrl kind=$kind")
-                ChallengeManager.ensureAuthenticated(normalizedUrl, kind)
+                ChallengeManager.ensureAuthenticated(recoveryLandingUrl(normalizedUrl, kind), kind)
                 val retried = requestDocument(
                     url = normalizedUrl,
                     referer = referer,
@@ -554,15 +554,16 @@ object HdFullProvider : Provider {
 
     private suspend fun performRecovery(targetUrl: String, kind: RecoveryKind) {
         ensureStoredCredentials()
+        val landingUrl = recoveryLandingUrl(targetUrl, kind)
 
         when (kind) {
-            RecoveryKind.LOGIN -> Log.d(TAG, "Login detected -> opening WebView for $targetUrl")
-            RecoveryKind.CHALLENGE -> Log.d(TAG, "Cloudflare detected -> opening WebView for $targetUrl")
+            RecoveryKind.LOGIN -> Log.d(TAG, "Login detected -> opening WebView for $landingUrl")
+            RecoveryKind.CHALLENGE -> Log.d(TAG, "Cloudflare detected -> opening WebView for $landingUrl")
         }
 
         getResolver().get(
-            url = targetUrl,
-            headers = authHeaders(targetUrl),
+            url = landingUrl,
+            headers = authHeaders(landingUrl),
             completion = { currentUrl, html, cookies ->
                 val authenticated = when (kind) {
                     RecoveryKind.LOGIN -> hasLoginSessionCookies(cookies) &&
@@ -669,13 +670,24 @@ object HdFullProvider : Provider {
             }
 
             Log.w(TAG, "Retrying after auth recovery -> kind=$kind url=$targetUrl", error)
-            ChallengeManager.ensureAuthenticated(targetUrl, kind)
+            ChallengeManager.ensureAuthenticated(recoveryLandingUrl(targetUrl, kind), kind)
             block()
         }
     }
 
     private fun recoveryKindForPath(url: String): RecoveryKind {
         return if (hasLoginSessionOnUrl(url)) RecoveryKind.CHALLENGE else RecoveryKind.LOGIN
+    }
+
+    private fun recoveryLandingUrl(targetUrl: String, kind: RecoveryKind): String {
+        val normalizedUrl = normalizeRequestUrl(targetUrl)
+        val path = runCatching { normalizedUrl.toHttpUrl().encodedPath.lowercase(Locale.ROOT) }
+            .getOrDefault("")
+
+        return when (kind) {
+            RecoveryKind.LOGIN -> baseUrl
+            RecoveryKind.CHALLENGE -> if (path.contains("/login")) normalizedUrl else baseUrl
+        }
     }
 
     private object ChallengeManager {
