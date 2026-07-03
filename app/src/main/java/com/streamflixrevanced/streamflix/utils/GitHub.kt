@@ -87,10 +87,11 @@ object GitHub {
             .build()
     }
 
-    suspend fun downloadBytes(url: String): ByteArray {
+    suspend fun downloadBytes(url: String, accept: String = "application/octet-stream"): ByteArray {
         val request = Request.Builder()
             .url(url)
             .get()
+            .header("Accept", accept)
             .build()
 
         return downloadClient.newCall(request).execute().use { response ->

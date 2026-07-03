@@ -63,7 +63,7 @@ object InAppUpdater {
         }
 
         val apkBytes = withContext(Dispatchers.IO) {
-            GitHub.downloadBytes(asset.browserDownloadUrl)
+            GitHub.downloadBytes(asset.url)
         }
 
         FileOutputStream(apk).use { output ->
