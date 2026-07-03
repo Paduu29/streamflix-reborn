@@ -60,6 +60,7 @@ class HomeViewModel(database: AppDatabase) : ViewModel() {
     private val _userDataCache = MutableStateFlow<UserDataCache.UserData?>(null)
     private var currentProvider: Provider? = null
     private val isLoadingHome = AtomicBoolean(false)
+    private val reportedMissingHdFullCredentials = AtomicBoolean(false)
 
     @OptIn(ExperimentalCoroutinesApi::class)
     val state: Flow<State> = combine(
@@ -378,6 +379,28 @@ class HomeViewModel(database: AppDatabase) : ViewModel() {
         }
         currentProvider = provider
         val appContext = StreamFlixApp.instance.applicationContext
+
+        if (provider is HdFullProvider) {
+            val hasCredentials =
+                UserPreferences.getProviderCache(HdFullProvider, "username").isNotBlank() &&
+                    UserPreferences.getProviderCache(HdFullProvider, "password").isNotBlank()
+
+            if (!hasCredentials) {
+                if (!reportedMissingHdFullCredentials.getAndSet(true)) {
+                    _state.emit(
+                        State.FailedLoading(
+                            IllegalStateException(
+                                "HdFull requires a saved username and password in provider settings."
+                            )
+                        )
+                    )
+                }
+                isLoadingHome.set(false)
+                return@launch
+            }
+
+            reportedMissingHdFullCredentials.set(false)
+        }
 
         if (provider is HdFullProvider) {
             _state.emit(State.Loading)

@@ -22,6 +22,7 @@ import com.streamflixreborn.streamflix.utils.UserPreferences
 import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.async
 import kotlinx.coroutines.coroutineScope
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
 import org.json.JSONArray
@@ -556,30 +557,40 @@ object HdFullProvider : Provider {
     }
 
     private suspend fun validateRecoveredSession(targetUrl: String, kind: RecoveryKind): Boolean {
-        return try {
-            val doc = requestDocument(
-                url = targetUrl,
-                referer = targetUrl,
-                headers = pageHeaders(targetUrl, referer = targetUrl),
-                ensureAuth = false,
-                authRetriesRemaining = 0,
-            )
-            val valid = when (kind) {
-                RecoveryKind.LOGIN -> hasLoginSessionOnUrl(targetUrl) &&
-                    !looksLikeLoginPage(doc, targetUrl) &&
-                    !looksLikeCloudflarePage(doc, targetUrl)
+        repeat(4) { attempt ->
+            val valid = try {
+                val doc = requestDocument(
+                    url = targetUrl,
+                    referer = targetUrl,
+                    headers = pageHeaders(targetUrl, referer = targetUrl),
+                    ensureAuth = false,
+                    authRetriesRemaining = 0,
+                )
+                when (kind) {
+                    RecoveryKind.LOGIN -> hasLoginSessionOnUrl(targetUrl) &&
+                        !looksLikeLoginPage(doc, targetUrl) &&
+                        !looksLikeCloudflarePage(doc, targetUrl)
 
-                RecoveryKind.CHALLENGE -> hasLoginSessionOnUrl(targetUrl) &&
-                    hasClearanceCookieOnUrl(targetUrl) &&
-                    !looksLikeLoginPage(doc, targetUrl) &&
-                    !looksLikeCloudflarePage(doc, targetUrl)
+                    RecoveryKind.CHALLENGE -> hasLoginSessionOnUrl(targetUrl) &&
+                        hasClearanceCookieOnUrl(targetUrl) &&
+                        !looksLikeLoginPage(doc, targetUrl) &&
+                        !looksLikeCloudflarePage(doc, targetUrl)
+                }
+            } catch (error: Exception) {
+                Log.w(TAG, "Recovery validation failed -> kind=$kind url=$targetUrl attempt=${attempt + 1}", error)
+                false
             }
-            Log.d(TAG, "Recovery validation -> kind=$kind url=$targetUrl valid=$valid")
-            valid
-        } catch (error: Exception) {
-            Log.w(TAG, "Recovery validation failed -> kind=$kind url=$targetUrl", error)
-            false
+
+            Log.d(TAG, "Recovery validation -> kind=$kind url=$targetUrl attempt=${attempt + 1} valid=$valid")
+            if (valid) {
+                return true
+            }
+
+            if (attempt < 3) {
+                delay(750)
+            }
         }
+        return false
     }
 
     private object ChallengeManager {
