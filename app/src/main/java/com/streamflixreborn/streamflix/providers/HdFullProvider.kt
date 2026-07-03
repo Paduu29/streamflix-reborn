@@ -165,7 +165,13 @@ object HdFullProvider : Provider {
 
     override suspend fun getHome(): List<Category> = coroutineScope {
         ensureStoredCredentials()
-        parseHomeCategories(fetchDocument(baseUrl, baseUrl))
+        retryWithAuthRecovery(baseUrl, recoveryKindForPath(baseUrl)) {
+            val doc = fetchDocument(baseUrl, baseUrl)
+            if (looksLikeLoginPage(doc, baseUrl) || looksLikeCloudflarePage(doc, baseUrl)) {
+                throw IllegalStateException("HdFull returned an authentication page for $baseUrl")
+            }
+            parseHomeCategories(doc)
+        }
     }
 
     override suspend fun search(query: String, page: Int): List<AppAdapter.Item> {
@@ -181,19 +187,25 @@ object HdFullProvider : Provider {
         }
 
         return try {
-            val home = fetchDocument(baseUrl, baseUrl)
-            val csrf = home.selectFirst("input[name=__csrf_magic]")?.attr("value")
-                ?: throw IllegalStateException("HdFull search csrf missing")
+            retryWithAuthRecovery(baseUrl, RecoveryKind.CHALLENGE) {
+                val home = fetchDocument(baseUrl, baseUrl)
+                val csrf = home.selectFirst("input[name=__csrf_magic]")?.attr("value")
+                    ?: throw IllegalStateException("HdFull search csrf missing")
 
-            val html = service.search(
-                fields = linkedMapOf(
-                    "__csrf_magic" to csrf,
-                    "menu" to "search",
-                    "query" to query,
-                ),
-                headers = searchHeaders("$baseUrl/")
-            )
-            parseSearchResults(html.toDocument(baseUrl))
+                val html = service.search(
+                    fields = linkedMapOf(
+                        "__csrf_magic" to csrf,
+                        "menu" to "search",
+                        "query" to query,
+                    ),
+                    headers = searchHeaders("$baseUrl/")
+                )
+                val doc = html.toDocument(baseUrl)
+                if (looksLikeLoginPage(doc, baseUrl) || looksLikeCloudflarePage(doc, baseUrl)) {
+                    throw IllegalStateException("HdFull search returned an authentication page for $baseUrl")
+                }
+                parseSearchResults(doc)
+            }
         } catch (error: MissingCredentialsException) {
             throw error
         } catch (error: Exception) {
@@ -204,7 +216,13 @@ object HdFullProvider : Provider {
 
     override suspend fun getMovies(page: Int): List<Movie> = try {
         val path = if (page <= 1) "/peliculas" else "/peliculas/date/$page"
-        parseCards(fetchDocument("$baseUrl$path", baseUrl), includeEpisodes = false).filterIsInstance<Movie>()
+        retryWithAuthRecovery("$baseUrl$path", recoveryKindForPath("$baseUrl$path")) {
+            val doc = fetchDocument("$baseUrl$path", baseUrl)
+            if (looksLikeLoginPage(doc, "$baseUrl$path") || looksLikeCloudflarePage(doc, "$baseUrl$path")) {
+                throw IllegalStateException("HdFull returned an authentication page for $baseUrl$path")
+            }
+            parseCards(doc, includeEpisodes = false).filterIsInstance<Movie>()
+        }
     } catch (error: MissingCredentialsException) {
         throw error
     } catch (error: Exception) {
@@ -214,7 +232,13 @@ object HdFullProvider : Provider {
 
     override suspend fun getTvShows(page: Int): List<TvShow> = try {
         val path = if (page <= 1) "/series" else "/series/date/$page"
-        parseCards(fetchDocument("$baseUrl$path", baseUrl), includeEpisodes = false).filterIsInstance<TvShow>()
+        retryWithAuthRecovery("$baseUrl$path", recoveryKindForPath("$baseUrl$path")) {
+            val doc = fetchDocument("$baseUrl$path", baseUrl)
+            if (looksLikeLoginPage(doc, "$baseUrl$path") || looksLikeCloudflarePage(doc, "$baseUrl$path")) {
+                throw IllegalStateException("HdFull returned an authentication page for $baseUrl$path")
+            }
+            parseCards(doc, includeEpisodes = false).filterIsInstance<TvShow>()
+        }
     } catch (error: MissingCredentialsException) {
         throw error
     } catch (error: Exception) {
@@ -287,21 +311,23 @@ object HdFullProvider : Provider {
         }
 
         return try {
-            val response = service.episodes(
-                fields = linkedMapOf(
-                    "action" to "season",
-                    "start" to "0",
-                    "limit" to "0",
-                    "show" to showId,
-                    "season" to seasonNumber.toString(),
-                    "elang" to "ALL",
-                ),
-                headers = episodesHeaders("$baseUrl/serie/$showSlug/temporada-$seasonNumber")
-            )
-            val array = JSONArray(response)
-            List(array.length()) { index ->
-                array.getJSONObject(index).toEpisode()
-            }.sortedBy { it.number }
+            retryWithAuthRecovery("$baseUrl/serie/$showSlug/temporada-$seasonNumber", RecoveryKind.CHALLENGE) {
+                val response = service.episodes(
+                    fields = linkedMapOf(
+                        "action" to "season",
+                        "start" to "0",
+                        "limit" to "0",
+                        "show" to showId,
+                        "season" to seasonNumber.toString(),
+                        "elang" to "ALL",
+                    ),
+                    headers = episodesHeaders("$baseUrl/serie/$showSlug/temporada-$seasonNumber")
+                )
+                val array = JSONArray(response)
+                List(array.length()) { index ->
+                    array.getJSONObject(index).toEpisode()
+                }.sortedBy { it.number }
+            }
         } catch (error: MissingCredentialsException) {
             throw error
         } catch (error: Exception) {
@@ -314,11 +340,17 @@ object HdFullProvider : Provider {
         val path = if (id.startsWith("/")) id else "/$id"
         val url = if (page <= 1) "$baseUrl$path" else "$baseUrl$path/$page"
         return try {
-            Genre(
-                id = id,
-                name = path.substringAfterLast('/').replace('-', ' ').replaceFirstChar { it.titlecase(Locale.ROOT) },
-                shows = parseCards(fetchDocument(url, baseUrl), includeEpisodes = false).filterIsInstance<Show>()
-            )
+            retryWithAuthRecovery(url, recoveryKindForPath(url)) {
+                val doc = fetchDocument(url, baseUrl)
+                if (looksLikeLoginPage(doc, url) || looksLikeCloudflarePage(doc, url)) {
+                    throw IllegalStateException("HdFull returned an authentication page for $url")
+                }
+                Genre(
+                    id = id,
+                    name = path.substringAfterLast('/').replace('-', ' ').replaceFirstChar { it.titlecase(Locale.ROOT) },
+                    shows = parseCards(doc, includeEpisodes = false).filterIsInstance<Show>()
+                )
+            }
         } catch (error: MissingCredentialsException) {
             throw error
         } catch (error: Exception) {
@@ -339,7 +371,13 @@ object HdFullProvider : Provider {
                 else -> mediaUrl(id, isMovie = false)
             }
 
-            val doc = fetchDocument(url, url)
+            val doc = retryWithAuthRecovery(url, recoveryKindForPath(url)) {
+                val document = fetchDocument(url, url)
+                if (looksLikeLoginPage(document, url) || looksLikeCloudflarePage(document, url)) {
+                    throw IllegalStateException("HdFull returned an authentication page for $url")
+                }
+                document
+            }
             val links = decodeLinks(doc)
             links.mapNotNull { link ->
                 val provider = providerMap[link.provider] ?: return@mapNotNull null
@@ -616,6 +654,28 @@ object HdFullProvider : Provider {
             }
         }
         return false
+    }
+
+    private suspend fun <T> retryWithAuthRecovery(
+        targetUrl: String,
+        kind: RecoveryKind,
+        block: suspend () -> T,
+    ): T {
+        return try {
+            block()
+        } catch (error: Exception) {
+            if (!hasStoredCredentials() || !looksLikeAuthFailure(error)) {
+                throw error
+            }
+
+            Log.w(TAG, "Retrying after auth recovery -> kind=$kind url=$targetUrl", error)
+            ChallengeManager.ensureAuthenticated(targetUrl, kind)
+            block()
+        }
+    }
+
+    private fun recoveryKindForPath(url: String): RecoveryKind {
+        return if (hasLoginSessionOnUrl(url)) RecoveryKind.CHALLENGE else RecoveryKind.LOGIN
     }
 
     private object ChallengeManager {
@@ -1440,16 +1500,26 @@ object HdFullProvider : Provider {
         val value = path?.trim().orEmpty()
         if (value.isBlank()) return null
         return when {
-            value.startsWith("http://") || value.startsWith("https://") -> value
+            value.startsWith("http://") || value.startsWith("https://") -> value.rewriteHdFullThumbHost()
             value.startsWith("/") -> "$baseUrl$value"
             else -> "https://hdfullcdn.cc/tthumb/312x176/$value"
         }
     }
 
     private fun String.normalizeThumb(): String = when {
-        startsWith("http://") || startsWith("https://") -> this
+        startsWith("http://") || startsWith("https://") -> rewriteHdFullThumbHost()
         startsWith("/") -> "$baseUrl$this"
         else -> thumbnailUrl(this) ?: this
+    }
+
+    private fun String.rewriteHdFullThumbHost(): String {
+        return when {
+            contains("://hdfull.one/tthumb/") -> replaceFirst("://hdfull.one/", "://hdfullcdn.cc/")
+            contains("://www.hdfull.one/tthumb/") -> replaceFirst("://www.hdfull.one/", "://hdfullcdn.cc/")
+            contains("://hdfull.sbs/tthumb/") -> replaceFirst("://hdfull.sbs/", "://hdfullcdn.cc/")
+            contains("://www.hdfull.sbs/tthumb/") -> replaceFirst("://www.hdfull.sbs/", "://hdfullcdn.cc/")
+            else -> this
+        }
     }
 
     private fun normalizeUrl(url: String): String {
