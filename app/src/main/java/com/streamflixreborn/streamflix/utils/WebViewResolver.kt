@@ -177,6 +177,7 @@ class WebViewResolver(private val context: Context) {
                 }
             }
         }
+        Log.d(TAG, "[WebView] Opened")
 
         if (isTv && completion != null && activityContext != null) {
             deferredLoadUrl = url
@@ -396,7 +397,10 @@ class WebViewResolver(private val context: Context) {
                         showSoftKeyboard(webView)
                     }
                 }
-            } catch (e: Exception) { Log.e(TAG, "[WebView] CRITICAL UI ERROR", e) }
+            } catch (e: Exception) {
+                Log.e(TAG, "[WebView] CRITICAL UI ERROR", e)
+                cleanup()
+            }
         }
     }
 
@@ -465,14 +469,24 @@ class WebViewResolver(private val context: Context) {
     }
 
     private fun cleanup() {
-        mainHandler.post {
+        val action: () -> Unit = {
             try {
                 deferredLoadUrl = null
                 deferredLoadHeaders = emptyMap()
-                dialog?.dismiss(); dialog = null
-                webView?.stopLoading(); webView?.destroy(); webView = null
+                dialog?.dismiss()
+                dialog = null
+                webView?.stopLoading()
+                webView?.destroy()
+                webView = null
                 virtualCursor = null
+                Log.d(TAG, "[WebView] Closed")
             } catch (e: Exception) { }
+        }
+
+        if (Looper.myLooper() == Looper.getMainLooper()) {
+            action()
+        } else {
+            mainHandler.post(action)
         }
     }
 }
