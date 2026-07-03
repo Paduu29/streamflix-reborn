@@ -57,6 +57,8 @@ object HdFullProvider : Provider {
         "HdFull requires a saved username and password in provider settings."
 
     private var webViewResolver: WebViewResolver? = null
+    @Volatile
+    private var recoveryGraceUntilMillis: Long = 0L
     private val service by lazy {
         Retrofit.Builder()
             .baseUrl("$baseUrl/")
@@ -416,6 +418,7 @@ object HdFullProvider : Provider {
         }
 
         val normalizedUrl = normalizeRequestUrl(url)
+        awaitRecoveryGraceIfNeeded(normalizedUrl)
         Log.d(TAG, "HdFull request -> url=$normalizedUrl")
         logCookieSnapshot(normalizedUrl)
 
@@ -550,9 +553,31 @@ object HdFullProvider : Provider {
         )
 
         synchronizeCookies()
+        recoveryGraceUntilMillis = System.currentTimeMillis() + 2000
 
-        if (!validateRecoveredSession(targetUrl, kind)) {
-            throw IllegalStateException("HdFull recovery did not produce a valid browser session")
+        val validated = validateRecoveredSession(targetUrl, kind)
+        if (!validated) {
+            val cookiesRecovered = when (kind) {
+                RecoveryKind.LOGIN -> hasLoginSessionOnUrl(targetUrl)
+                RecoveryKind.CHALLENGE -> hasLoginSessionOnUrl(targetUrl) && hasClearanceCookieOnUrl(targetUrl)
+            }
+
+            if (!cookiesRecovered) {
+                throw IllegalStateException("HdFull recovery did not produce a valid browser session")
+            }
+
+            Log.w(
+                TAG,
+                "Recovery validation was inconclusive but cookies were recovered -> kind=$kind url=$targetUrl"
+            )
+        }
+    }
+
+    private suspend fun awaitRecoveryGraceIfNeeded(url: String) {
+        val now = System.currentTimeMillis()
+        val waitMillis = recoveryGraceUntilMillis - now
+        if (waitMillis > 0 && (hasLoginSessionOnUrl(url) || hasClearanceCookieOnUrl(url))) {
+            delay(waitMillis.coerceAtMost(2000L))
         }
     }
 
@@ -809,9 +834,6 @@ object HdFullProvider : Provider {
 
         return """
             (function() {
-                if (window.__streamflixHdFullLoginSubmitted) return true;
-                window.__streamflixHdFullLoginSubmitted = true;
-
                 const usernameValue = $username;
                 const passwordValue = $password;
 
@@ -825,6 +847,45 @@ object HdFullProvider : Provider {
                     }
                     element.dispatchEvent(new Event('input', { bubbles: true }));
                     element.dispatchEvent(new Event('change', { bubbles: true }));
+                    return true;
+                };
+
+                const triggerSubmit = (form, passwordField) => {
+                    const submitSelectors = [
+                        '#popup_login_form button[type="submit"]',
+                        '#popup_login_form input[type="submit"]',
+                        'button[type="submit"]',
+                        'input[type="submit"]',
+                        'button[name="login"]',
+                        '.btn-login',
+                        '.login-button',
+                        '.popup-login-button'
+                    ];
+
+                    const submitButton = document.querySelector(submitSelectors.join(', '));
+                    if (submitButton) {
+                        submitButton.click();
+                        return true;
+                    }
+
+                    const loginForm = form ||
+                        passwordField?.form ||
+                        document.querySelector('#popup_login_form form') ||
+                        document.querySelector('form[action*="login" i]') ||
+                        document.querySelector('form');
+
+                    if (!loginForm) return false;
+
+                    if (typeof loginForm.requestSubmit === 'function') {
+                        loginForm.requestSubmit();
+                    } else {
+                        const submitEvent = new Event('submit', { bubbles: true, cancelable: true });
+                        loginForm.dispatchEvent(submitEvent);
+                        if (!submitEvent.defaultPrevented) {
+                            loginForm.submit();
+                        }
+                    }
+
                     return true;
                 };
 
@@ -850,7 +911,6 @@ object HdFullProvider : Provider {
                 const passwordField = document.querySelector(passwordSelectors.join(', '));
 
                 if (!passwordField) {
-                    window.__streamflixHdFullLoginSubmitted = false;
                     return false;
                 }
 
@@ -859,53 +919,17 @@ object HdFullProvider : Provider {
                 }
                 setValue(passwordField, passwordValue);
 
-                const clickLogin = () => {
-                    const submitSelectors = [
-                        '#popup_login_form button[type="submit"]',
-                        '#popup_login_form input[type="submit"]',
-                        'button[type="submit"]',
-                        'input[type="submit"]',
-                        'button[name="login"]',
-                        '.btn-login',
-                        '.login-button',
-                        '.popup-login-button'
-                    ];
-
-                    const submitButton = document.querySelector(submitSelectors.join(', '));
-                    if (submitButton) {
-                        submitButton.click();
-                        return true;
-                    }
-
-                    const form = passwordField.form ||
-                        document.querySelector('#popup_login_form form') ||
-                        document.querySelector('form[action*="login" i]') ||
-                        document.querySelector('form');
-
-                    if (!form) return false;
-                    if (typeof form.requestSubmit === 'function') {
-                        form.requestSubmit();
-                    } else {
-                        form.submit();
-                    }
-                    return true;
-                };
-
+                let attempted = false;
                 if (typeof window.dologin === 'function') {
                     try {
-                        window.dologin('#popup_login_result');
-                        return true;
+                        attempted = window.dologin('#popup_login_result') !== false || attempted;
                     } catch (error) {
                         console.log('dologin failed', error);
                     }
                 }
 
-                if (!clickLogin()) {
-                    window.__streamflixHdFullLoginSubmitted = false;
-                    return false;
-                }
-
-                return true;
+                attempted = triggerSubmit(passwordField.form, passwordField) || attempted;
+                return attempted;
             })();
         """.trimIndent()
     }
