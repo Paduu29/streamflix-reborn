@@ -242,6 +242,23 @@
         </PreferenceCategory>
 
         <PreferenceCategory
+            android:key="pc_hdfull_settings"
+            android:title="@string/settings_hdfull_connection_title">
+
+            <EditTextPreference
+                android:key="provider_hdfull_username"
+                android:title="@string/settings_hdfull_username"
+                android:summary="@string/settings_hdfull_username_summary"
+                android:inputType="text" />
+
+            <EditTextPreference
+                android:key="provider_hdfull_password"
+                android:title="@string/settings_hdfull_password"
+                android:summary="@string/settings_hdfull_password_summary"
+                android:inputType="textPassword" />
+        </PreferenceCategory>
+
+        <PreferenceCategory
             android:key="pc_streamingcommunity_settings"
             android:title="@string/settings_category_streamingcommunity">
 

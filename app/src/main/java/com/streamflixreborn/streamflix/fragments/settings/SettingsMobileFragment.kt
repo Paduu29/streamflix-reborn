@@ -35,6 +35,7 @@ import com.streamflixreborn.streamflix.backup.BackupRestoreManager
 import com.streamflixreborn.streamflix.backup.ProviderBackupContext
 import com.streamflixreborn.streamflix.database.AppDatabase
 import com.streamflixreborn.streamflix.providers.FrenchStreamProvider
+import com.streamflixreborn.streamflix.providers.HdFullProvider
 import com.streamflixreborn.streamflix.providers.Provider
 import com.streamflixreborn.streamflix.providers.ProviderConfigUrl
 import com.streamflixreborn.streamflix.providers.ProviderPortalUrl
@@ -352,6 +353,50 @@ class SettingsMobileFragment : PreferenceFragmentCompat() {
                     getString(R.string.settings_subdl_api_key_success)
                 }
                 Toast.makeText(requireContext(), message, Toast.LENGTH_SHORT).show()
+                true
+            }
+        }
+
+        findPreference<EditTextPreference>("provider_hdfull_username")?.apply {
+            val storedValue = UserPreferences.getProviderCache(HdFullProvider, "username")
+            summary = storedValue.ifBlank { getString(R.string.settings_hdfull_username_summary) }
+            text = storedValue
+            setOnBindEditTextListener { editText ->
+                editText.inputType = InputType.TYPE_CLASS_TEXT
+                editText.imeOptions = EditorInfo.IME_ACTION_DONE
+                editText.hint = getString(R.string.settings_hdfull_username)
+                editText.setText(storedValue)
+            }
+            setOnPreferenceChangeListener { preference, newValue ->
+                val value = (newValue as String).trim()
+                UserPreferences.setProviderCache(HdFullProvider, "username", value)
+                preference.summary = value.ifBlank { getString(R.string.settings_hdfull_username_summary) }
+                true
+            }
+        }
+
+        findPreference<EditTextPreference>("provider_hdfull_password")?.apply {
+            val storedValue = UserPreferences.getProviderCache(HdFullProvider, "password")
+            summary = if (storedValue.isBlank()) {
+                getString(R.string.settings_hdfull_password_summary)
+            } else {
+                getString(R.string.settings_hdfull_password_saved)
+            }
+            text = storedValue
+            setOnBindEditTextListener { editText ->
+                editText.inputType = InputType.TYPE_CLASS_TEXT or InputType.TYPE_TEXT_VARIATION_PASSWORD
+                editText.imeOptions = EditorInfo.IME_ACTION_DONE
+                editText.hint = getString(R.string.settings_hdfull_password)
+                editText.setText(storedValue)
+            }
+            setOnPreferenceChangeListener { preference, newValue ->
+                val value = (newValue as String).trim()
+                UserPreferences.setProviderCache(HdFullProvider, "password", value)
+                preference.summary = if (value.isBlank()) {
+                    getString(R.string.settings_hdfull_password_summary)
+                } else {
+                    getString(R.string.settings_hdfull_password_saved)
+                }
                 true
             }
         }
@@ -775,12 +820,14 @@ class SettingsMobileFragment : PreferenceFragmentCompat() {
         val isStreamingCommunity = UserPreferences.currentProvider is StreamingCommunityProvider
         val isCuevana = UserPreferences.currentProvider?.name == "Cuevana 3"
         val isPoseidon = UserPreferences.currentProvider?.name == "Poseidonhd2"
+        val isHdFull = UserPreferences.currentProvider is HdFullProvider
         val hasConfigProvider = UserPreferences.currentProvider is ProviderConfigUrl
-        val hasSpecificOptions = isStreamingCommunity || isCuevana || isPoseidon
+        val hasSpecificOptions = isStreamingCommunity || isCuevana || isPoseidon || isHdFull
 
         findPreference<PreferenceCategory>("pc_streamingcommunity_settings")?.isVisible = isStreamingCommunity
         findPreference<PreferenceCategory>("pc_cuevana_settings")?.isVisible = isCuevana
         findPreference<PreferenceCategory>("pc_poseidon_settings")?.isVisible = isPoseidon
+        findPreference<PreferenceCategory>("pc_hdfull_settings")?.isVisible = isHdFull
         findPreference<PreferenceCategory>("pc_provider_empty_state")?.isVisible = !hasConfigProvider && !hasSpecificOptions
     }
 
@@ -1349,6 +1396,22 @@ class SettingsMobileFragment : PreferenceFragmentCompat() {
         findPreference<EditTextPreference>("SUBDL_API_KEY")?.apply {
             summary = if (UserPreferences.subdlApiKey.isEmpty()) getString(R.string.settings_subdl_api_key_summary) else UserPreferences.subdlApiKey
             text = UserPreferences.subdlApiKey
+        }
+
+        findPreference<EditTextPreference>("provider_hdfull_username")?.apply {
+            val storedValue = UserPreferences.getProviderCache(HdFullProvider, "username")
+            summary = storedValue.ifBlank { getString(R.string.settings_hdfull_username_summary) }
+            text = storedValue
+        }
+
+        findPreference<EditTextPreference>("provider_hdfull_password")?.apply {
+            val storedValue = UserPreferences.getProviderCache(HdFullProvider, "password")
+            summary = if (storedValue.isBlank()) {
+                getString(R.string.settings_hdfull_password_summary)
+            } else {
+                getString(R.string.settings_hdfull_password_saved)
+            }
+            text = storedValue
         }
 
         findPreference<ListPreference>("p_doh_provider_url")?.apply {

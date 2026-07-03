@@ -10,6 +10,7 @@ import com.streamflixreborn.streamflix.models.Category
 import com.streamflixreborn.streamflix.models.Episode
 import com.streamflixreborn.streamflix.models.Movie
 import com.streamflixreborn.streamflix.models.TvShow
+import com.streamflixreborn.streamflix.providers.HdFullProvider
 import com.streamflixreborn.streamflix.providers.Provider
 import com.streamflixreborn.streamflix.ui.UserDataNotifier
 import com.streamflixreborn.streamflix.utils.HomeCacheStore
@@ -36,6 +37,7 @@ import kotlinx.coroutines.flow.flowOn
 import kotlinx.coroutines.flow.transformLatest
 import kotlinx.coroutines.launch
 import java.util.concurrent.ConcurrentHashMap
+import java.util.concurrent.atomic.AtomicBoolean
 
 class HomeViewModel(database: AppDatabase) : ViewModel() {
 
@@ -57,6 +59,7 @@ class HomeViewModel(database: AppDatabase) : ViewModel() {
     private val continueWatchingSeasonEpisodesCache = ConcurrentHashMap<String, List<Episode>>()
     private val _userDataCache = MutableStateFlow<UserDataCache.UserData?>(null)
     private var currentProvider: Provider? = null
+    private val isLoadingHome = AtomicBoolean(false)
 
     @OptIn(ExperimentalCoroutinesApi::class)
     val state: Flow<State> = combine(
@@ -364,31 +367,61 @@ class HomeViewModel(database: AppDatabase) : ViewModel() {
     }
 
     fun getHome() = viewModelScope.launch(Dispatchers.IO) {
+        if (!isLoadingHome.compareAndSet(false, true)) {
+            return@launch
+        }
+
         val provider = UserPreferences.currentProvider ?: run {
             _state.emit(State.FailedLoading(IllegalStateException("No provider selected")))
+            isLoadingHome.set(false)
             return@launch
         }
         currentProvider = provider
         val appContext = StreamFlixApp.instance.applicationContext
-        val cachedCategories = HomeCacheStore.read(appContext, provider)
-        if (!cachedCategories.isNullOrEmpty()) {
-            _state.emit(State.SuccessLoading(cachedCategories))
-        } else {
+
+        if (provider is HdFullProvider) {
             _state.emit(State.Loading)
-        }
+            loadUserDataCache(provider)
 
-        loadUserDataCache(provider)
+            val result = runCatching { provider.getHome() }
+            val categories = result.getOrNull()
 
-        try {
-            val categories = provider.getHome()
-            HomeCacheStore.write(appContext, provider, categories)
-            _state.emit(State.SuccessLoading(categories))
-        } catch (e: Exception) {
-            Log.e("HomeViewModel", "getHome: ", e)
-            if (cachedCategories.isNullOrEmpty()) {
-                _state.emit(State.FailedLoading(e))
+            if (categories != null) {
+                HomeCacheStore.write(appContext, provider, categories)
+                _state.emit(State.SuccessLoading(categories))
+            } else {
+                val error = result.exceptionOrNull()
+                Log.e("HomeViewModel", "getHome: ", error)
+                val cachedCategories = HomeCacheStore.read(appContext, provider)
+                if (!cachedCategories.isNullOrEmpty()) {
+                    _state.emit(State.SuccessLoading(cachedCategories))
+                } else {
+                    _state.emit(State.FailedLoading(error as? Exception ?: Exception(error?.message ?: "getHome failed")))
+                }
+            }
+        } else {
+            val cachedCategories = HomeCacheStore.read(appContext, provider)
+            if (!cachedCategories.isNullOrEmpty()) {
+                _state.emit(State.SuccessLoading(cachedCategories))
+            } else {
+                _state.emit(State.Loading)
+            }
+
+            loadUserDataCache(provider)
+
+            try {
+                val categories = provider.getHome()
+                HomeCacheStore.write(appContext, provider, categories)
+                _state.emit(State.SuccessLoading(categories))
+            } catch (e: Exception) {
+                Log.e("HomeViewModel", "getHome: ", e)
+                if (cachedCategories.isNullOrEmpty()) {
+                    _state.emit(State.FailedLoading(e))
+                }
             }
         }
+
+        isLoadingHome.set(false)
     }
 
     private fun loadUserDataCache(provider: Provider) {
