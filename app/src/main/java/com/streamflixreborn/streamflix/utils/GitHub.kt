@@ -1,5 +1,8 @@
 package com.streamflixreborn.streamflix.utils
 
+import com.streamflixreborn.streamflix.BuildConfig
+import okhttp3.OkHttpClient
+import okhttp3.Request
 import com.google.gson.annotations.SerializedName
 import retrofit2.Retrofit
 import retrofit2.converter.gson.GsonConverterFactory
@@ -9,6 +12,7 @@ import retrofit2.http.Path
 object GitHub {
 
     private val service = ApiService.build()
+    private val downloadClient = buildClient()
 
 
     object Releases {
@@ -39,8 +43,10 @@ object GitHub {
 
         companion object {
             fun build(): ApiService {
+                val client = buildClient()
                 val retrofit = Retrofit.Builder()
                     .baseUrl("https://api.github.com/")
+                    .client(client)
                     .addConverterFactory(GsonConverterFactory.create())
                     .build()
 
@@ -59,6 +65,37 @@ object GitHub {
             @Path("owner") owner: String,
             @Path("repo") repo: String,
         ): Release
+    }
+
+    private fun buildClient(): OkHttpClient {
+        return OkHttpClient.Builder()
+            .addInterceptor { chain ->
+                val builder = chain.request().newBuilder()
+                    .header("Accept", "application/vnd.github+json")
+                    .header("X-GitHub-Api-Version", "2022-11-28")
+
+                val token = BuildConfig.GITHUB_TOKEN.trim()
+                if (token.isNotBlank()) {
+                    builder.header("Authorization", "Bearer $token")
+                }
+
+                chain.proceed(builder.build())
+            }
+            .build()
+    }
+
+    suspend fun downloadBytes(url: String): ByteArray {
+        val request = Request.Builder()
+            .url(url)
+            .get()
+            .build()
+
+        return downloadClient.newCall(request).execute().use { response ->
+            if (!response.isSuccessful) {
+                throw IllegalStateException("GitHub download failed: ${response.code}")
+            }
+            response.body?.bytes() ?: throw IllegalStateException("GitHub download returned empty body")
+        }
     }
 
 

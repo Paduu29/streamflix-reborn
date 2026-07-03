@@ -9,7 +9,6 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 import java.io.File
 import java.io.FileOutputStream
-import java.net.URL
 import kotlin.math.max
 
 object InAppUpdater {
@@ -63,10 +62,14 @@ object InAppUpdater {
             )
         }
 
-        withContext(Dispatchers.IO) {
-            URL(asset.browserDownloadUrl).openStream()
-        }.use { input ->
-            FileOutputStream(apk).use { output -> input.copyTo(output) }
+        val apkBytes = withContext(Dispatchers.IO) {
+            GitHub.downloadBytes(asset.browserDownloadUrl)
+        }
+
+        FileOutputStream(apk).use { output ->
+            apkBytes.inputStream().use { input ->
+                input.copyTo(output)
+            }
         }
 
         return apk
