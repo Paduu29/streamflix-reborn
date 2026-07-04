@@ -70,9 +70,13 @@ object GitHub {
     private fun buildClient(): OkHttpClient {
         return OkHttpClient.Builder()
             .addInterceptor { chain ->
-                val builder = chain.request().newBuilder()
-                    .header("Accept", "application/vnd.github+json")
+                val request = chain.request()
+                val builder = request.newBuilder()
                     .header("X-GitHub-Api-Version", "2022-11-28")
+
+                if (request.header("Accept").isNullOrBlank()) {
+                    builder.header("Accept", "application/vnd.github+json")
+                }
 
                 val token = BuildConfig.GITHUB_TOKEN
                     .trim()

@@ -3,6 +3,7 @@ package com.streamflixrevanced.streamflix.utils
 import android.content.Context
 import android.content.Intent
 import android.net.Uri
+import android.webkit.MimeTypeMap
 import androidx.core.content.FileProvider
 import com.streamflixrevanced.streamflix.BuildConfig
 import kotlinx.coroutines.Dispatchers
@@ -53,12 +54,13 @@ object InAppUpdater {
     suspend fun downloadApk(context: Context, asset: GitHub.Release.Asset): File {
         context.cacheDir.listFiles()
             ?.filter { it.extension == "apk" }
-            ?.forEach { it.deleteOnExit() }
+            ?.forEach { it.delete() }
 
         val apk = withContext(Dispatchers.IO) {
             File.createTempFile(
                 "${File(asset.name).nameWithoutExtension}-",
-                ".${File(asset.name).extension}"
+                ".apk",
+                context.cacheDir
             )
         }
 
@@ -72,20 +74,60 @@ object InAppUpdater {
             }
         }
 
+        validateApk(context, apk, asset)
         return apk
     }
 
     fun installApk(context: Context, uri: Uri) {
+        val apkFile = File(uri.path!!)
+        val apkUri = FileProvider.getUriForFile(
+            context,
+            BuildConfig.APPLICATION_ID + ".provider",
+            apkFile
+        )
+        val mimeType = MimeTypeMap.getSingleton()
+            .getMimeTypeFromExtension(apkFile.extension)
+            ?: "application/vnd.android.package-archive"
+
         val intent = Intent(Intent.ACTION_VIEW).also { intent ->
             intent.addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
             intent.addFlags(Intent.FLAG_ACTIVITY_CLEAR_TOP)
+            intent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
             intent.putExtra(Intent.EXTRA_NOT_UNKNOWN_SOURCE, true)
-            intent.data = FileProvider.getUriForFile(
-                context,
-                BuildConfig.APPLICATION_ID + ".provider",
-                File(uri.path!!)
-            )
+            intent.setDataAndType(apkUri, mimeType)
         }
         context.startActivity(intent)
+    }
+
+    @Suppress("DEPRECATION")
+    private fun validateApk(context: Context, apk: File, asset: GitHub.Release.Asset) {
+        if (!apk.exists() || apk.length() <= 0L) {
+            throw IllegalStateException("Downloaded APK is empty")
+        }
+
+        if (asset.size > 0 && apk.length() != asset.size.toLong()) {
+            throw IllegalStateException(
+                "Downloaded APK size mismatch: expected ${asset.size}, got ${apk.length()}"
+            )
+        }
+
+        val header = ByteArray(4)
+        apk.inputStream().use { input ->
+            if (input.read(header) != header.size) {
+                throw IllegalStateException("Downloaded APK is too small")
+            }
+        }
+
+        val isZip = header[0] == 0x50.toByte() &&
+            header[1] == 0x4B.toByte() &&
+            (header[2] == 0x03.toByte() || header[2] == 0x05.toByte() || header[2] == 0x07.toByte())
+        if (!isZip) {
+            throw IllegalStateException("Downloaded file is not an APK archive")
+        }
+
+        val archiveInfo = context.packageManager.getPackageArchiveInfo(apk.absolutePath, 0)
+        if (archiveInfo == null) {
+            throw IllegalStateException("Downloaded APK package metadata is invalid")
+        }
     }
 }

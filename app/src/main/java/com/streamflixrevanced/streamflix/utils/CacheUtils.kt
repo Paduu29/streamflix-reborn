@@ -6,7 +6,7 @@ import android.webkit.CookieManager
 import android.webkit.WebStorage
 import android.webkit.WebView
 import com.bumptech.glide.Glide
-import com.streamflixreborn.streamflix.providers.HdFullProvider
+import com.streamflixrevanced.streamflix.providers.HdFullProvider
 import java.io.File
 
 object CacheUtils {
