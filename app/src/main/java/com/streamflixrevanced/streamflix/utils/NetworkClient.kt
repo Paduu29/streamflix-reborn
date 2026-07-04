@@ -52,7 +52,7 @@ object NetworkClient {
                     .filter { it.isNotBlank() }
                     .mapNotNull { Cookie.parse(url, it) }
                     .forEach { cookie ->
-                        cookiesByName[cookie.name] = cookie
+                        cookiesByName.putIfAbsent(cookie.name, cookie)
                     }
             }
             return cookiesByName.values.toList()

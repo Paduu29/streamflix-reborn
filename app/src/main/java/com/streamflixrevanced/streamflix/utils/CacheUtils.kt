@@ -2,8 +2,11 @@ package com.streamflixrevanced.streamflix.utils
 
 import android.content.Context
 import android.util.Log
+import android.webkit.CookieManager
+import android.webkit.WebStorage
 import android.webkit.WebView
 import com.bumptech.glide.Glide
+import com.streamflixreborn.streamflix.providers.HdFullProvider
 import java.io.File
 
 object CacheUtils {
@@ -33,11 +36,15 @@ object CacheUtils {
         }
 
         try {
+            CookieManager.getInstance().removeAllCookies(null)
+            CookieManager.getInstance().flush()
+            WebStorage.getInstance().deleteAllData()
             WebView(context).apply {
                 clearCache(true)
                 destroy()
             }
-            Log.d(TAG, "Cache WebView eliminata.")
+            HdFullProvider.resetAuthenticationState()
+            Log.d(TAG, "Cache, cookie e storage WebView eliminati.")
         } catch (e: Exception) {
             Log.e(TAG, "Errore WebView: ${e.message}")
         }

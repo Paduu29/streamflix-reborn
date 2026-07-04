@@ -20,9 +20,7 @@ import com.streamflixrevanced.streamflix.utils.NetworkClient
 import com.streamflixrevanced.streamflix.utils.WebViewResolver
 import com.streamflixrevanced.streamflix.utils.UserPreferences
 import kotlinx.coroutines.CompletableDeferred
-import kotlinx.coroutines.async
 import kotlinx.coroutines.coroutineScope
-import kotlinx.coroutines.delay
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
 import org.json.JSONArray
@@ -58,7 +56,13 @@ object HdFullProvider : Provider {
 
     private var webViewResolver: WebViewResolver? = null
     @Volatile
-    private var recoveryGraceUntilMillis: Long = 0L
+    private var authenticatedSessionReady: Boolean = false
+
+    fun resetAuthenticationState() {
+        authenticatedSessionReady = false
+        Log.d(TAG, "Authentication state reset")
+    }
+
     private val service by lazy {
         Retrofit.Builder()
             .baseUrl("$baseUrl/")
@@ -70,16 +74,16 @@ object HdFullProvider : Provider {
 
     private class MissingCredentialsException : IllegalStateException(MISSING_CREDENTIALS_MESSAGE)
 
-    private enum class ChallengeState {
-        READY,
-        CHALLENGE_RUNNING,
-        LOGIN_RUNNING,
+    private enum class AuthState {
+        UNKNOWN,
+        CLOUDFLARE,
+        CHECK_PAGE,
+        LOGOUT,
+        LOGIN_PAGE,
+        AUTO_LOGIN,
+        AUTHENTICATED,
+        DONE,
         FAILED,
-    }
-
-    private enum class RecoveryKind {
-        CHALLENGE,
-        LOGIN,
     }
 
     private data class ResponseSnapshot(
@@ -88,9 +92,11 @@ object HdFullProvider : Provider {
         val finalUrl: String,
     )
 
-    private data class RecoveryTask(
-        val deferred: CompletableDeferred<Unit>,
-        val kind: RecoveryKind,
+    private val hdFullCookieHosts = listOf(
+        "https://hdfull.one/",
+        "https://www.hdfull.one/",
+        "https://hdfull.sbs/",
+        "https://www.hdfull.sbs/",
     )
 
     private interface HdFullService {
@@ -165,7 +171,7 @@ object HdFullProvider : Provider {
 
     override suspend fun getHome(): List<Category> = coroutineScope {
         ensureStoredCredentials()
-        retryWithAuthRecovery(baseUrl, recoveryKindForPath(baseUrl)) {
+        retryWithAuthRecovery(baseUrl) {
             val doc = fetchDocument(baseUrl, baseUrl)
             parseHomeCategories(doc)
         }
@@ -184,20 +190,8 @@ object HdFullProvider : Provider {
         }
 
         return try {
-            retryWithAuthRecovery(baseUrl, RecoveryKind.CHALLENGE) {
-                val home = fetchDocument(baseUrl, baseUrl)
-                val csrf = home.selectFirst("input[name=__csrf_magic]")?.attr("value")
-                    ?: throw IllegalStateException("HdFull search csrf missing")
-
-                val html = service.search(
-                    fields = linkedMapOf(
-                        "__csrf_magic" to csrf,
-                        "menu" to "search",
-                        "query" to query,
-                    ),
-                    headers = searchHeaders("$baseUrl/")
-                )
-                val doc = html.toDocument(baseUrl)
+            retryWithAuthRecovery(baseUrl) {
+                val doc = searchWithWebView(query)
                 parseSearchResults(doc)
             }
         } catch (error: MissingCredentialsException) {
@@ -210,7 +204,7 @@ object HdFullProvider : Provider {
 
     override suspend fun getMovies(page: Int): List<Movie> = try {
         val path = if (page <= 1) "/peliculas" else "/peliculas/date/$page"
-        retryWithAuthRecovery("$baseUrl$path", recoveryKindForPath("$baseUrl$path")) {
+        retryWithAuthRecovery("$baseUrl$path") {
             val doc = fetchDocument("$baseUrl$path", baseUrl)
             parseCards(doc, includeEpisodes = false).filterIsInstance<Movie>()
         }
@@ -223,7 +217,7 @@ object HdFullProvider : Provider {
 
     override suspend fun getTvShows(page: Int): List<TvShow> = try {
         val path = if (page <= 1) "/series" else "/series/date/$page"
-        retryWithAuthRecovery("$baseUrl$path", recoveryKindForPath("$baseUrl$path")) {
+        retryWithAuthRecovery("$baseUrl$path") {
             val doc = fetchDocument("$baseUrl$path", baseUrl)
             parseCards(doc, includeEpisodes = false).filterIsInstance<TvShow>()
         }
@@ -299,18 +293,8 @@ object HdFullProvider : Provider {
         }
 
         return try {
-            retryWithAuthRecovery("$baseUrl/serie/$showSlug/temporada-$seasonNumber", RecoveryKind.CHALLENGE) {
-                val response = service.episodes(
-                    fields = linkedMapOf(
-                        "action" to "season",
-                        "start" to "0",
-                        "limit" to "0",
-                        "show" to showId,
-                        "season" to seasonNumber.toString(),
-                        "elang" to "ALL",
-                    ),
-                    headers = episodesHeaders("$baseUrl/serie/$showSlug/temporada-$seasonNumber")
-                )
+            retryWithAuthRecovery("$baseUrl/serie/$showSlug/temporada-$seasonNumber") {
+                val response = episodesWithWebView(showSlug, showId, seasonNumber)
                 val array = JSONArray(response)
                 List(array.length()) { index ->
                     array.getJSONObject(index).toEpisode()
@@ -328,7 +312,7 @@ object HdFullProvider : Provider {
         val path = if (id.startsWith("/")) id else "/$id"
         val url = if (page <= 1) "$baseUrl$path" else "$baseUrl$path/$page"
         return try {
-            retryWithAuthRecovery(url, recoveryKindForPath(url)) {
+            retryWithAuthRecovery(url) {
                 val doc = fetchDocument(url, baseUrl)
                 Genre(
                     id = id,
@@ -356,7 +340,7 @@ object HdFullProvider : Provider {
                 else -> mediaUrl(id, isMovie = false)
             }
 
-            val doc = retryWithAuthRecovery(url, recoveryKindForPath(url)) {
+            val doc = retryWithAuthRecovery(url) {
                 val document = fetchDocument(url, url)
                 document
             }
@@ -397,25 +381,8 @@ object HdFullProvider : Provider {
     }
 
     private suspend fun ensureAuthenticatedSession(targetUrl: String = baseUrl) {
-        ChallengeManager.ensureAuthenticated(targetUrl)
-    }
-
-    private suspend fun validateAuthenticatedSession(targetUrl: String): Boolean {
-        return try {
-            val doc = requestDocument(
-                url = targetUrl,
-                referer = targetUrl,
-                headers = pageHeaders(targetUrl, referer = targetUrl),
-                ensureAuth = false,
-                authRetriesRemaining = 0,
-            )
-            val valid = !looksLikeLoginPage(doc, targetUrl) && !looksLikeCloudflarePage(doc, targetUrl)
-            Log.d(TAG, "Session validation -> url=$targetUrl valid=$valid")
-            valid
-        } catch (error: Exception) {
-            Log.w(TAG, "Session validation failed for $targetUrl", error)
-            false
-        }
+        if (authenticatedSessionReady) return
+        AuthManager.ensureAuthenticated(targetUrl)
     }
 
     private suspend fun fetchDocument(url: String, referer: String): Document {
@@ -433,28 +400,34 @@ object HdFullProvider : Provider {
         ensureAuth: Boolean = true,
         authRetriesRemaining: Int = 2,
     ): Document {
+        val normalizedUrl = normalizeRequestUrl(url)
         if (ensureAuth) {
-            ensureAuthenticatedSession(baseUrl)
+            ensureAuthenticatedSession(normalizedUrl)
         }
 
-        val normalizedUrl = normalizeRequestUrl(url)
-        awaitRecoveryGraceIfNeeded(normalizedUrl)
         Log.d(TAG, "HdFull request -> url=$normalizedUrl")
         logCookieSnapshot(normalizedUrl)
 
         return try {
             val snapshot = executeRequest(normalizedUrl, headers)
             val document = snapshot.body.toDocument(snapshot.finalUrl)
-            val recoveryKind = detectRecoveryKind(snapshot, document, normalizedUrl)
+            val authFailed = snapshot.code == 403 ||
+                looksLikeLoginPage(document, snapshot.finalUrl) ||
+                looksLikeCloudflarePage(document, snapshot.finalUrl)
 
-            if (recoveryKind != null) {
+            if (authFailed) {
+                if (snapshot.code == 403 && authenticatedSessionReady) {
+                    Log.w(TAG, "OkHttp is blocked after authentication, falling back to WebView fetch -> url=$normalizedUrl")
+                    return fetchDocumentWithWebView(normalizedUrl, headers)
+                }
+
                 if (authRetriesRemaining <= 0) {
                     throw IllegalStateException("HdFull returned an authentication page for $normalizedUrl")
                 }
 
-                Log.w(TAG, "Auth issue detected -> kind=$recoveryKind url=$normalizedUrl")
-                Log.d(TAG, "Retry started -> url=$normalizedUrl kind=$recoveryKind")
-                ChallengeManager.ensureAuthenticated(recoveryLandingUrl(normalizedUrl, recoveryKind), recoveryKind)
+                authenticatedSessionReady = false
+                Log.w(TAG, "Auth issue detected -> code=${snapshot.code} url=$normalizedUrl")
+                AuthManager.ensureAuthenticated(normalizedUrl, force = true)
                 val retried = requestDocument(
                     url = normalizedUrl,
                     referer = referer,
@@ -469,10 +442,9 @@ object HdFullProvider : Provider {
             document
         } catch (error: Exception) {
             if (authRetriesRemaining > 0 && looksLikeAuthFailure(error)) {
-                val kind = if (hasLoginSessionOnUrl(normalizedUrl)) RecoveryKind.CHALLENGE else RecoveryKind.LOGIN
-                Log.w(TAG, "HdFull request needs browser recovery -> kind=$kind url=$normalizedUrl", error)
-                Log.d(TAG, "Retry started -> url=$normalizedUrl kind=$kind")
-                ChallengeManager.ensureAuthenticated(recoveryLandingUrl(normalizedUrl, kind), kind)
+                authenticatedSessionReady = false
+                Log.w(TAG, "HdFull request needs browser authentication -> url=$normalizedUrl", error)
+                AuthManager.ensureAuthenticated(normalizedUrl, force = true)
                 val retried = requestDocument(
                     url = normalizedUrl,
                     referer = referer,
@@ -503,8 +475,38 @@ object HdFullProvider : Provider {
         }
     }
 
-    private fun synchronizeCookies() {
+    private fun synchronizeCookies(finalUrl: String? = null) {
         val cookieManager = CookieManager.getInstance()
+        val candidates = linkedSetOf<String>().apply {
+            if (!finalUrl.isNullOrBlank()) {
+                add(finalUrl)
+                runCatching { finalUrl.toHttpUrl() }.getOrNull()?.let { url ->
+                    add(url.newBuilder().encodedPath("/").query(null).fragment(null).build().toString())
+                }
+            }
+            addAll(hdFullCookieHosts)
+        }
+
+        val cookiesByName = linkedMapOf<String, String>()
+        candidates.forEach { candidate ->
+            runCatching { cookieManager.getCookie(candidate) }
+                .getOrNull()
+                ?.split(";")
+                ?.map { it.trim() }
+                ?.filter { it.contains("=") }
+                ?.forEach { cookie ->
+                    cookiesByName[cookie.substringBefore("=")] = cookie
+                }
+        }
+
+        if (cookiesByName.isNotEmpty()) {
+            hdFullCookieHosts.forEach { target ->
+                cookiesByName.values.forEach { cookie ->
+                    cookieManager.setCookie(target, "$cookie; Path=/")
+                }
+            }
+        }
+
         cookieManager.flush()
         Log.d(TAG, "Cookies synchronized for HDFull hosts")
         logCookieSnapshot(baseUrl)
@@ -513,16 +515,6 @@ object HdFullProvider : Provider {
         logCookieSnapshot("https://www.hdfull.sbs/")
         logCookieSnapshot("https://hdfullcdn.cc/")
         logCookieSnapshot("https://www.hdfullcdn.cc/")
-    }
-
-    private fun detectRecoveryKind(snapshot: ResponseSnapshot, document: Document, currentUrl: String): RecoveryKind? {
-        return when {
-            looksLikeLoginPage(document, currentUrl) -> RecoveryKind.LOGIN
-            looksLikeCloudflarePage(document, currentUrl) -> RecoveryKind.CHALLENGE
-            snapshot.code == 403 && !hasLoginSessionOnUrl(currentUrl) -> RecoveryKind.LOGIN
-            snapshot.code == 403 -> RecoveryKind.CHALLENGE
-            else -> null
-        }
     }
 
     private fun looksLikeAuthFailure(error: Throwable): Boolean {
@@ -534,114 +526,133 @@ object HdFullProvider : Provider {
             message.contains("verification page", ignoreCase = true)
     }
 
-    private suspend fun performRecovery(targetUrl: String, kind: RecoveryKind) {
+    private suspend fun performDeterministicAuthentication(targetUrl: String) {
         ensureStoredCredentials()
-        val landingUrl = recoveryLandingUrl(targetUrl, kind)
+        var state = AuthState.UNKNOWN
+        var logoutAttempts = 0
+        var lastLogoutScriptAt = 0L
+        var loginInjected = false
+        var authenticatedSince = 0L
 
-        when (kind) {
-            RecoveryKind.LOGIN -> Log.d(TAG, "Login detected -> opening WebView for $landingUrl")
-            RecoveryKind.CHALLENGE -> Log.d(TAG, "Cloudflare detected -> opening WebView for $landingUrl")
+        fun transition(next: AuthState, currentUrl: String, html: String) {
+            if (state == next) return
+            Log.d(
+                TAG,
+                "STATE_${state.name} -> STATE_${next.name} url=$currentUrl " +
+                    "cloudflare=${looksLikeCloudflarePage(html, currentUrl)} " +
+                    "loginForm=${looksLikeLoginPage(html, currentUrl)} " +
+                    "logoutTriggered=${next == AuthState.LOGOUT} " +
+                    "loginSucceeded=${next == AuthState.AUTHENTICATED || next == AuthState.DONE}"
+            )
+            state = next
         }
 
-        getResolver().get(
+        val landingUrl = normalizeRequestUrl(targetUrl).takeIf { isAllowedHdFullAuthNavigation(it) } ?: baseUrl
+        Log.d(TAG, "STATE_UNKNOWN url=$landingUrl cloudflare=false loginForm=false logoutTriggered=false loginSucceeded=false")
+
+        val authResult = getResolver().getResult(
             url = landingUrl,
             headers = authHeaders(landingUrl),
-            completion = { currentUrl, html, cookies ->
-                val authenticated = when (kind) {
-                    RecoveryKind.LOGIN -> hasLoginSessionCookies(cookies) &&
-                        !looksLikeLoginPage(html, currentUrl) &&
-                        !looksLikeCloudflarePage(html, currentUrl)
-
-                    RecoveryKind.CHALLENGE -> hasLoginSessionCookies(cookies) &&
-                        hasClearanceCookieCookies(cookies) &&
-                        !looksLikeLoginPage(html, currentUrl) &&
-                        !looksLikeCloudflarePage(html, currentUrl)
-                }
+            shouldAllowNavigation = { navigationUrl, _ -> isAllowedHdFullAuthNavigation(navigationUrl) },
+            completion = completion@{ currentUrl, html, cookies ->
+                val cloudflare = looksLikeCloudflarePage(html, currentUrl)
+                val loginForm = looksLikeLoginPage(html, currentUrl)
+                val authenticated = isAuthenticatedPage(currentUrl, html, cookies)
                 Log.d(
                     TAG,
-                    "Recovery polling -> kind=$kind url=$currentUrl authenticated=$authenticated cookies=$cookies"
+                    "Auth poll -> state=STATE_${state.name} url=$currentUrl cloudflare=$cloudflare loginForm=$loginForm authenticated=$authenticated logoutAttempts=$logoutAttempts"
                 )
-                authenticated
-            },
-            pageReadyScriptProvider = { currentUrl, html, cookies ->
-                if (requiresLoginAutomation(currentUrl, html, cookies)) {
-                    Log.d(TAG, "Login detected -> injecting automation at $currentUrl")
-                    buildLoginAutomationScript()
+
+                when (state) {
+                    AuthState.UNKNOWN -> transition(AuthState.CHECK_PAGE, currentUrl, html)
+                    AuthState.CLOUDFLARE -> if (!cloudflare) transition(AuthState.CHECK_PAGE, currentUrl, html)
+                    else -> Unit
+                }
+
+                when (state) {
+                    AuthState.CHECK_PAGE -> when {
+                        cloudflare -> transition(AuthState.CLOUDFLARE, currentUrl, html)
+                        authenticated -> transition(AuthState.AUTHENTICATED, currentUrl, html)
+                        loginForm -> transition(AuthState.LOGIN_PAGE, currentUrl, html)
+                        logoutAttempts < 2 -> transition(AuthState.LOGOUT, currentUrl, html)
+                        else -> transition(AuthState.FAILED, currentUrl, html)
+                    }
+
+                    AuthState.LOGOUT -> when {
+                        cloudflare -> transition(AuthState.CLOUDFLARE, currentUrl, html)
+                        loginForm -> transition(AuthState.LOGIN_PAGE, currentUrl, html)
+                        logoutAttempts >= 2 && !isLogoutUrl(currentUrl) -> transition(AuthState.FAILED, currentUrl, html)
+                    }
+
+                    AuthState.LOGIN_PAGE -> when {
+                        cloudflare -> transition(AuthState.CLOUDFLARE, currentUrl, html)
+                        authenticated -> transition(AuthState.AUTHENTICATED, currentUrl, html)
+                    }
+
+                    AuthState.AUTO_LOGIN -> when {
+                        cloudflare -> transition(AuthState.CLOUDFLARE, currentUrl, html)
+                        authenticated -> transition(AuthState.AUTHENTICATED, currentUrl, html)
+                    }
+
+                    else -> Unit
+                }
+
+                if (state == AuthState.AUTHENTICATED) {
+                    if (authenticatedSince == 0L) {
+                        authenticatedSince = System.currentTimeMillis()
+                    }
+                    if (System.currentTimeMillis() - authenticatedSince >= 1500L) {
+                        transition(AuthState.DONE, currentUrl, html)
+                        return@completion true
+                    }
                 } else {
-                    null
+                    authenticatedSince = 0L
+                }
+
+                false
+            },
+            pageReadyScriptProvider = { currentUrl, html, _ ->
+                when {
+                    state == AuthState.LOGOUT && logoutAttempts < 2 -> {
+                        val now = System.currentTimeMillis()
+                        if (lastLogoutScriptAt == 0L || now - lastLogoutScriptAt > 3500L) {
+                            logoutAttempts++
+                            lastLogoutScriptAt = now
+                            Log.d(TAG, "STATE_LOGOUT triggering logout attempt=$logoutAttempts url=$currentUrl")
+                            "window.location.replace('$baseUrl/logout');"
+                        } else {
+                            null
+                        }
+                    }
+
+                    state == AuthState.LOGIN_PAGE &&
+                        !loginInjected &&
+                        looksLikeLoginPage(html, currentUrl) &&
+                        !looksLikeCloudflarePage(html, currentUrl) -> {
+                        loginInjected = true
+                        transition(AuthState.AUTO_LOGIN, currentUrl, html)
+                        Log.d(TAG, "STATE_AUTO_LOGIN injecting native login automation url=$currentUrl")
+                        buildLoginAutomationScript()
+                    }
+
+                    else -> null
                 }
             }
         )
 
-        synchronizeCookies()
-        recoveryGraceUntilMillis = System.currentTimeMillis() + 2000
+        synchronizeCookies(authResult.finalUrl)
 
-        val validated = validateRecoveredSession(targetUrl, kind)
-        if (!validated) {
-            val cookiesRecovered = when (kind) {
-                RecoveryKind.LOGIN -> hasLoginSessionOnUrl(targetUrl)
-                RecoveryKind.CHALLENGE -> hasLoginSessionOnUrl(targetUrl) && hasClearanceCookieOnUrl(targetUrl)
-            }
-
-            if (!cookiesRecovered) {
-                throw IllegalStateException("HdFull recovery did not produce a valid browser session")
-            }
-
-            Log.w(
-                TAG,
-                "Recovery validation was inconclusive but cookies were recovered -> kind=$kind url=$targetUrl"
-            )
+        if (state != AuthState.DONE) {
+            authenticatedSessionReady = false
+            transition(AuthState.FAILED, targetUrl, "")
+            throw IllegalStateException("HdFull authentication failed before reaching authenticated UI")
         }
-    }
 
-    private suspend fun awaitRecoveryGraceIfNeeded(url: String) {
-        val now = System.currentTimeMillis()
-        val waitMillis = recoveryGraceUntilMillis - now
-        if (waitMillis > 0 && (hasLoginSessionOnUrl(url) || hasClearanceCookieOnUrl(url))) {
-            delay(waitMillis.coerceAtMost(2000L))
-        }
-    }
-
-    private suspend fun validateRecoveredSession(targetUrl: String, kind: RecoveryKind): Boolean {
-        repeat(4) { attempt ->
-            val valid = try {
-                val doc = requestDocument(
-                    url = targetUrl,
-                    referer = targetUrl,
-                    headers = pageHeaders(targetUrl, referer = targetUrl),
-                    ensureAuth = false,
-                    authRetriesRemaining = 0,
-                )
-                when (kind) {
-                    RecoveryKind.LOGIN -> hasLoginSessionOnUrl(targetUrl) &&
-                        !looksLikeLoginPage(doc, targetUrl) &&
-                        !looksLikeCloudflarePage(doc, targetUrl)
-
-                    RecoveryKind.CHALLENGE -> hasLoginSessionOnUrl(targetUrl) &&
-                        hasClearanceCookieOnUrl(targetUrl) &&
-                        !looksLikeLoginPage(doc, targetUrl) &&
-                        !looksLikeCloudflarePage(doc, targetUrl)
-                }
-            } catch (error: Exception) {
-                Log.w(TAG, "Recovery validation failed -> kind=$kind url=$targetUrl attempt=${attempt + 1}", error)
-                false
-            }
-
-            Log.d(TAG, "Recovery validation -> kind=$kind url=$targetUrl attempt=${attempt + 1} valid=$valid")
-            if (valid) {
-                return true
-            }
-
-            if (attempt < 3) {
-                delay(750)
-            }
-        }
-        return false
+        authenticatedSessionReady = true
     }
 
     private suspend fun <T> retryWithAuthRecovery(
         targetUrl: String,
-        kind: RecoveryKind,
         block: suspend () -> T,
     ): T {
         return try {
@@ -651,119 +662,186 @@ object HdFullProvider : Provider {
                 throw error
             }
 
-            Log.w(TAG, "Retrying after auth recovery -> kind=$kind url=$targetUrl", error)
-            ChallengeManager.ensureAuthenticated(recoveryLandingUrl(targetUrl, kind), kind)
+            authenticatedSessionReady = false
+            Log.w(TAG, "Retrying after deterministic authentication -> url=$targetUrl", error)
+            AuthManager.ensureAuthenticated(targetUrl, force = true)
             block()
         }
     }
 
-    private fun recoveryKindForPath(url: String): RecoveryKind {
-        return if (hasLoginSessionOnUrl(url)) RecoveryKind.CHALLENGE else RecoveryKind.LOGIN
-    }
+    private suspend fun searchWithWebView(query: String): Document {
+        val quotedQuery = JSONObject.quote(query)
+        val result = getResolver().getResult(
+            url = baseUrl,
+            headers = authHeaders(baseUrl),
+            shouldAllowNavigation = { navigationUrl, _ -> isAllowedHdFullAuthNavigation(navigationUrl) },
+            valueScript = """
+                (function() {
+                    const node = document.getElementById('hdfull-search-result');
+                    return node ? node.textContent : '';
+                })();
+            """.trimIndent(),
+            completion = { currentUrl, html, _ ->
+                val done = html.contains("id=\"hdfull-search-result\"", ignoreCase = true) &&
+                    html.contains("data-done=\"1\"", ignoreCase = true)
+                Log.d(
+                    TAG,
+                    "Search WebView poll -> url=$currentUrl cloudflare=${looksLikeCloudflarePage(html, currentUrl)} loginForm=${looksLikeLoginPage(html, currentUrl)} done=$done"
+                )
+                done
+            },
+            pageReadyScriptProvider = { currentUrl, html, _ ->
+                if (looksLikeCloudflarePage(html, currentUrl) || looksLikeLoginPage(html, currentUrl)) {
+                    null
+                } else {
+                    buildSearchSubmissionScript(quotedQuery)
+                }
+            }
+        )
 
-    private fun recoveryLandingUrl(targetUrl: String, kind: RecoveryKind): String {
-        val normalizedUrl = normalizeRequestUrl(targetUrl)
-        val path = runCatching { normalizedUrl.toHttpUrl().encodedPath.lowercase(Locale.ROOT) }
-            .getOrDefault("")
-
-        return when (kind) {
-            RecoveryKind.LOGIN -> baseUrl
-            RecoveryKind.CHALLENGE -> if (path.contains("/login")) normalizedUrl else baseUrl
+        val html = decodeEvaluatedString(result.evaluatedValue)
+        if (html.isBlank()) {
+            throw IllegalStateException("HdFull search WebView response was empty")
         }
+        if (looksLikeCloudflarePage(html, result.finalUrl ?: baseUrl) || looksLikeLoginPage(html, result.finalUrl ?: baseUrl)) {
+            authenticatedSessionReady = false
+            throw IllegalStateException("HdFull search WebView response returned an authentication page")
+        }
+        Log.d(TAG, "Search WebView succeeded -> query=$query length=${html.length}")
+        return html.toDocument(baseUrl)
     }
 
-    private object ChallengeManager {
+    private suspend fun episodesWithWebView(showSlug: String, showId: String, seasonNumber: Int): String {
+        val seasonUrl = "$baseUrl/serie/$showSlug/temporada-$seasonNumber"
+        val result = getResolver().getResult(
+            url = seasonUrl,
+            headers = authHeaders(seasonUrl),
+            shouldAllowNavigation = { navigationUrl, _ -> isAllowedHdFullAuthNavigation(navigationUrl) },
+            valueScript = """
+                (function() {
+                    const node = document.getElementById('hdfull-episodes-result');
+                    return node ? node.textContent : '';
+                })();
+            """.trimIndent(),
+            completion = { currentUrl, html, _ ->
+                val done = html.contains("id=\"hdfull-episodes-result\"", ignoreCase = true) &&
+                    html.contains("data-done=\"1\"", ignoreCase = true)
+                Log.d(
+                    TAG,
+                    "Episodes WebView poll -> url=$currentUrl cloudflare=${looksLikeCloudflarePage(html, currentUrl)} loginForm=${looksLikeLoginPage(html, currentUrl)} done=$done"
+                )
+                done
+            },
+            pageReadyScriptProvider = { currentUrl, html, _ ->
+                if (looksLikeCloudflarePage(html, currentUrl) || looksLikeLoginPage(html, currentUrl)) {
+                    null
+                } else {
+                    buildEpisodesSubmissionScript(showId, seasonNumber)
+                }
+            }
+        )
+
+        val json = decodeEvaluatedString(result.evaluatedValue).trim()
+        if (json.isBlank()) {
+            throw IllegalStateException("HdFull episodes WebView response was empty")
+        }
+        if (!json.startsWith("[")) {
+            throw IllegalStateException("HdFull episodes WebView response was not JSON: ${json.take(80)}")
+        }
+        Log.d(TAG, "Episodes WebView succeeded -> show=$showId season=$seasonNumber length=${json.length}")
+        return json
+    }
+
+    private suspend fun fetchDocumentWithWebView(url: String, headers: Map<String, String>): Document {
+        val result = getResolver().getResult(
+            url = url,
+            headers = headers,
+            shouldAllowNavigation = { navigationUrl, _ -> isAllowedHdFullAuthNavigation(navigationUrl) },
+            completion = { currentUrl, html, _ ->
+                val cloudflare = looksLikeCloudflarePage(html, currentUrl)
+                val loginForm = looksLikeLoginPage(html, currentUrl)
+                val hasUsableHtml = html.length > 1000 &&
+                    (html.contains("home-thumb-item", ignoreCase = true) ||
+                        html.contains("section-title", ignoreCase = true) ||
+                        html.contains("show-poster", ignoreCase = true) ||
+                        html.contains("var ad", ignoreCase = true) ||
+                        html.contains("grid-item", ignoreCase = true) ||
+                        isAuthenticatedPage(currentUrl, html, ""))
+                Log.d(
+                    TAG,
+                    "WebView fetch poll -> url=$currentUrl cloudflare=$cloudflare loginForm=$loginForm usable=$hasUsableHtml"
+                )
+                !cloudflare && !loginForm && hasUsableHtml
+            }
+        )
+
+        val finalUrl = result.finalUrl ?: url
+        val document = result.html.toDocument(finalUrl)
+        if (looksLikeCloudflarePage(document, finalUrl) || looksLikeLoginPage(document, finalUrl)) {
+            authenticatedSessionReady = false
+            throw IllegalStateException("HdFull WebView fetch returned an authentication page for $url")
+        }
+        Log.d(TAG, "WebView fetch succeeded -> url=$url finalUrl=$finalUrl")
+        return document
+    }
+
+    private object AuthManager {
         private val mutex = Mutex()
         private var activeRecovery: CompletableDeferred<Unit>? = null
-        private var state = ChallengeState.READY
 
-        suspend fun ensureAuthenticated(targetUrl: String, requestedKind: RecoveryKind? = null) {
-            if (requestedKind == null && hasLoginSessionOnUrl(targetUrl)) {
-                state = ChallengeState.READY
-                logChallengeState(ChallengeState.READY, targetUrl, "session already available")
+        suspend fun ensureAuthenticated(targetUrl: String, force: Boolean = false) {
+            if (!force && authenticatedSessionReady) {
                 return
             }
 
-            val running = mutex.withLock {
-                if (requestedKind == null && hasLoginSessionOnUrl(targetUrl)) {
-                    state = ChallengeState.READY
-                    logChallengeState(state, targetUrl, "session restored while waiting")
+            var shouldRunRecovery = false
+            val recovery = mutex.withLock {
+                if (!force && authenticatedSessionReady) {
                     return@withLock null
                 }
 
                 activeRecovery?.let {
-                    logChallengeState(state, targetUrl, "waiting for existing recovery")
+                    Log.d(TAG, "STATE_UNKNOWN waiting for active authentication url=$targetUrl")
                     return@withLock it
                 }
 
-                val kind = requestedKind ?: RecoveryKind.LOGIN
                 val deferred = CompletableDeferred<Unit>()
                 activeRecovery = deferred
-                state = when (kind) {
-                    RecoveryKind.LOGIN -> ChallengeState.LOGIN_RUNNING
-                    RecoveryKind.CHALLENGE -> ChallengeState.CHALLENGE_RUNNING
-                }
-                logChallengeState(state, targetUrl, "starting $kind")
-                RecoveryTask(deferred, kind)
+                shouldRunRecovery = true
+                deferred
             }
 
-            if (running == null) {
+            if (recovery == null) {
                 return
             }
 
-            if (running is CompletableDeferred<*>) {
-                @Suppress("UNCHECKED_CAST")
-                (running as CompletableDeferred<Unit>).await()
+            if (!shouldRunRecovery) {
+                recovery.await()
                 return
             }
 
-            val task = running as RecoveryTask
             try {
-                performRecovery(targetUrl, task.kind)
-                task.deferred.complete(Unit)
+                performDeterministicAuthentication(targetUrl)
+                recovery.complete(Unit)
                 mutex.withLock {
-                    if (activeRecovery === task.deferred) {
+                    if (activeRecovery === recovery) {
                         activeRecovery = null
                     }
-                    state = ChallengeState.READY
-                    logChallengeState(state, targetUrl, "recovery complete")
                 }
             } catch (error: Throwable) {
-                task.deferred.completeExceptionally(error)
+                recovery.completeExceptionally(error)
                 mutex.withLock {
-                    if (activeRecovery === task.deferred) {
+                    if (activeRecovery === recovery) {
                         activeRecovery = null
                     }
-                    state = ChallengeState.FAILED
-                    logChallengeState(state, targetUrl, "recovery failed: ${error.message.orEmpty()}")
                 }
                 throw error
             }
         }
     }
 
-    private fun logChallengeState(state: ChallengeState, targetUrl: String, detail: String) {
-        Log.d(TAG, "ChallengeManager state=$state target=$targetUrl detail=$detail")
-    }
-
     private fun logCookieSnapshot(url: String) {
         Log.d(TAG, "Cookie snapshot -> url=${normalizeRequestUrl(url)} cookies=${cookieHeaderForLogging(url).ifBlank { "<empty>" }}")
-    }
-
-    private fun hasLoginSessionCookies(cookies: String): Boolean {
-        return cookies.contains("PHPSESSID=") && cookies.contains("guid=")
-    }
-
-    private fun hasLoginSessionOnUrl(url: String): Boolean {
-        return hasLoginSessionCookies(cookieHeaderForLogging(url))
-    }
-
-    private fun hasClearanceCookieCookies(cookies: String): Boolean {
-        return cookies.contains("cf_clearance=")
-    }
-
-    private fun hasClearanceCookieOnUrl(url: String): Boolean {
-        return hasClearanceCookieCookies(cookieHeaderForLogging(url))
     }
 
     private fun authHeaders(referer: String): Map<String, String> {
@@ -778,17 +856,17 @@ object HdFullProvider : Provider {
     }
 
     private fun pageHeaders(url: String, referer: String): Map<String, String> {
-        return linkedMapOf(
+        return hdFullHeaders(url, linkedMapOf(
             "User-Agent" to NetworkClient.USER_AGENT,
             "Accept" to "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
             "Accept-Language" to "es-ES,es;q=0.9,en-US;q=0.8,en;q=0.7",
             "Accept-Encoding" to "identity",
             "Referer" to referer,
-        )
+        ))
     }
 
     private fun searchHeaders(referer: String): Map<String, String> {
-        return linkedMapOf(
+        return hdFullHeaders(baseUrl, linkedMapOf(
             "User-Agent" to NetworkClient.USER_AGENT,
             "Accept" to "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
             "Accept-Language" to "es-ES,es;q=0.9,en-US;q=0.8,en;q=0.7",
@@ -796,11 +874,11 @@ object HdFullProvider : Provider {
             "Content-Type" to "application/x-www-form-urlencoded",
             "Referer" to referer,
             "Origin" to baseUrl,
-        )
+        ))
     }
 
     private fun episodesHeaders(referer: String): Map<String, String> {
-        return linkedMapOf(
+        return hdFullHeaders(baseUrl, linkedMapOf(
             "User-Agent" to NetworkClient.USER_AGENT,
             "Accept" to "application/json, text/javascript, */*; q=0.01",
             "Accept-Language" to "es-ES,es;q=0.9,en-US;q=0.8,en;q=0.7",
@@ -809,7 +887,15 @@ object HdFullProvider : Provider {
             "X-Requested-With" to "XMLHttpRequest",
             "Origin" to baseUrl,
             "Referer" to referer,
-        )
+        ))
+    }
+
+    private fun hdFullHeaders(url: String, headers: LinkedHashMap<String, String>): Map<String, String> {
+        val cookieHeader = cookieHeaderForLogging(url)
+        if (cookieHeader.isNotBlank()) {
+            headers["Cookie"] = cookieHeader
+        }
+        return headers
     }
 
     private fun Document.toDocument(url: String): Document {
@@ -826,12 +912,15 @@ object HdFullProvider : Provider {
 
     private fun looksLikeLoginPage(html: String, currentUrl: String): Boolean {
         val normalizedHtml = html.lowercase(Locale.ROOT)
-        val url = currentUrl.lowercase(Locale.ROOT)
-        return url.contains("/login") ||
-            normalizedHtml.contains("popup_login_form") ||
+        return normalizedHtml.contains("popup_login_form") ||
+            normalizedHtml.contains("popup_login_result") ||
             normalizedHtml.contains("dologin('#popup_login_result')") ||
+            normalizedHtml.contains("input type=\"password\"") ||
+            normalizedHtml.contains("input type='password'") ||
             normalizedHtml.contains("name=\"password\"") ||
-            normalizedHtml.contains("name='password'")
+            normalizedHtml.contains("name='password'") ||
+            normalizedHtml.contains("type=\"submit\"") && normalizedHtml.contains("login") ||
+            normalizedHtml.contains("type='submit'") && normalizedHtml.contains("login")
     }
 
     private fun looksLikeCloudflarePage(doc: Document, currentUrl: String): Boolean {
@@ -848,37 +937,43 @@ object HdFullProvider : Provider {
             normalizedHtml.contains("challenges.cloudflare.com")
     }
 
-    private fun isAuthenticatedPage(currentUrl: String, html: String, cookies: String): Boolean {
+    private fun isAuthenticatedPage(currentUrl: String, html: String, @Suppress("UNUSED_PARAMETER") cookies: String): Boolean {
         val normalizedHtml = html.lowercase(Locale.ROOT)
         val normalizedUrl = currentUrl.lowercase(Locale.ROOT)
-        return hasLoginSessionCookies(cookies) &&
-            cookies.contains("cf_clearance=") &&
+        val hasAuthenticatedUi = normalizedHtml.contains("/logout") ||
+            normalizedHtml.contains("logout") ||
+            normalizedHtml.contains("cerrar sesi") ||
+            normalizedHtml.contains("mi cuenta") ||
+            normalizedHtml.contains("account") ||
+            normalizedHtml.contains("profile") ||
+            normalizedHtml.contains("perfil") ||
+            normalizedHtml.contains("user-menu") ||
+            normalizedHtml.contains("user_panel") ||
+            normalizedHtml.contains("user-panel")
+
+        return hasAuthenticatedUi &&
             !normalizedUrl.contains("/login") &&
-            !normalizedHtml.contains("popup_login_form") &&
-            !normalizedHtml.contains("challenge-running") &&
-            !normalizedHtml.contains("just a moment")
+            !looksLikeLoginPage(html, currentUrl) &&
+            !looksLikeCloudflarePage(html, currentUrl)
     }
 
     private fun hasStoredCredentials(): Boolean {
         return storedUsername().isNotBlank() && storedPassword().isNotBlank()
     }
 
-    private fun requiresLoginAutomation(currentUrl: String, html: String, cookies: String): Boolean {
-        val normalizedUrl = currentUrl.lowercase(Locale.ROOT)
-        val normalizedHtml = html.lowercase(Locale.ROOT)
-        return hasStoredCredentials() &&
-            !hasLoginSessionCookies(cookies) &&
-            (
-                normalizedUrl.contains("/login") ||
-                    normalizedHtml.contains("popup_login_form") ||
-                    normalizedHtml.contains("popup_login_result") ||
-                    normalizedHtml.contains("dologin(") ||
-                    normalizedHtml.contains("input type=\"password\"") ||
-                    normalizedHtml.contains("input type='password'") ||
-                    normalizedHtml.contains("name=\"password\"") ||
-                    normalizedHtml.contains("name='password'") ||
-                    normalizedHtml.contains("login") && normalizedHtml.contains("password")
-                )
+    private fun isLogoutUrl(url: String): Boolean {
+        return runCatching { normalizeUrl(url).toHttpUrl().encodedPath.lowercase(Locale.ROOT) == "/logout" }
+            .getOrDefault(false)
+    }
+
+    private fun isAllowedHdFullAuthNavigation(url: String): Boolean {
+        val host = runCatching { normalizeUrl(url).toHttpUrl().host.lowercase(Locale.ROOT) }
+            .getOrDefault("")
+        return host == "hdfull.one" ||
+            host == "www.hdfull.one" ||
+            host == "hdfull.sbs" ||
+            host == "www.hdfull.sbs" ||
+            host == "challenges.cloudflare.com"
     }
 
     private fun buildLoginAutomationScript(): String {
@@ -985,6 +1080,111 @@ object HdFullProvider : Provider {
                 return attempted;
             })();
         """.trimIndent()
+    }
+
+    private fun buildSearchSubmissionScript(quotedQuery: String): String {
+        return """
+            (function() {
+                if (window.__hdfullSearchStarted) return null;
+                window.__hdfullSearchStarted = true;
+
+                let result = document.getElementById('hdfull-search-result');
+                if (!result) {
+                    result = document.createElement('pre');
+                    result.id = 'hdfull-search-result';
+                    result.style.display = 'none';
+                    document.documentElement.appendChild(result);
+                }
+
+                const csrf = document.querySelector('input[name="__csrf_magic"]')?.value || '';
+                if (!csrf) {
+                    result.dataset.done = '1';
+                    result.dataset.status = 'missing-csrf';
+                    result.textContent = '';
+                    return null;
+                }
+
+                const params = new URLSearchParams();
+                params.set('__csrf_magic', csrf);
+                params.set('menu', 'search');
+                params.set('query', $quotedQuery);
+
+                fetch('/buscar', {
+                    method: 'POST',
+                    credentials: 'include',
+                    headers: {
+                        'Accept': 'text/html, */*; q=0.01',
+                        'Content-Type': 'application/x-www-form-urlencoded; charset=UTF-8',
+                        'X-Requested-With': 'XMLHttpRequest'
+                    },
+                    body: params.toString()
+                }).then(async response => {
+                    result.dataset.status = String(response.status);
+                    result.textContent = await response.text();
+                    result.dataset.done = '1';
+                }).catch(error => {
+                    result.dataset.status = 'error';
+                    result.textContent = String(error && error.message ? error.message : error);
+                    result.dataset.done = '1';
+                });
+
+                return null;
+            })();
+        """.trimIndent()
+    }
+
+    private fun buildEpisodesSubmissionScript(showId: String, seasonNumber: Int): String {
+        val quotedShowId = JSONObject.quote(showId)
+        return """
+            (function() {
+                if (window.__hdfullEpisodesStarted) return null;
+                window.__hdfullEpisodesStarted = true;
+
+                let result = document.getElementById('hdfull-episodes-result');
+                if (!result) {
+                    result = document.createElement('pre');
+                    result.id = 'hdfull-episodes-result';
+                    result.style.display = 'none';
+                    document.documentElement.appendChild(result);
+                }
+
+                const params = new URLSearchParams();
+                params.set('action', 'season');
+                params.set('start', '0');
+                params.set('limit', '0');
+                params.set('show', $quotedShowId);
+                params.set('season', String($seasonNumber));
+                params.set('elang', 'ALL');
+
+                fetch('/a/episodes', {
+                    method: 'POST',
+                    credentials: 'include',
+                    headers: {
+                        'Accept': 'application/json, text/javascript, */*; q=0.01',
+                        'Content-Type': 'application/x-www-form-urlencoded; charset=UTF-8',
+                        'X-Requested-With': 'XMLHttpRequest'
+                    },
+                    body: params.toString()
+                }).then(async response => {
+                    result.dataset.status = String(response.status);
+                    result.textContent = await response.text();
+                    result.dataset.done = '1';
+                }).catch(error => {
+                    result.dataset.status = 'error';
+                    result.textContent = String(error && error.message ? error.message : error);
+                    result.dataset.done = '1';
+                });
+
+                return null;
+            })();
+        """.trimIndent()
+    }
+
+    private fun decodeEvaluatedString(value: String?): String {
+        val raw = value?.trim().orEmpty()
+        if (raw.isBlank() || raw == "null") return ""
+        return runCatching { JSONArray("[$raw]").getString(0) }
+            .getOrElse { raw.trim('"') }
     }
 
     private fun storedUsername(): String {
