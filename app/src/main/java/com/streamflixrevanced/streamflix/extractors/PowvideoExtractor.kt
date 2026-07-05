@@ -25,7 +25,8 @@ class PowvideoExtractor : Extractor() {
             shouldAllowNavigation = { url, isMainFrame ->
                 if (!isMainFrame) true else isAllowedPowvideoNavigation(url)
             },
-            valueScript = PLAYER_STATE_SCRIPT
+            valueScript = PLAYER_STATE_SCRIPT,
+            showImmediately = true
         )
 
         return extractVideo(

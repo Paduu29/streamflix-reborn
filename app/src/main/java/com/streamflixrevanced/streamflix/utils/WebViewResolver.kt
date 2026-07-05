@@ -68,8 +68,9 @@ class WebViewResolver(private val context: Context) {
         completion: ((currentUrl: String, html: String, cookies: String) -> Boolean)? = null,
         shouldAllowNavigation: ((url: String, isMainFrame: Boolean) -> Boolean)? = null,
         pageReadyScriptProvider: ((currentUrl: String, html: String, cookies: String) -> String?)? = null,
+        showImmediately: Boolean = false,
     ): String {
-        return getResult(url, headers, completion, shouldAllowNavigation, null, pageReadyScriptProvider).html
+        return getResult(url, headers, completion, shouldAllowNavigation, null, pageReadyScriptProvider, showImmediately).html
     }
 
     suspend fun getResult(
@@ -79,6 +80,7 @@ class WebViewResolver(private val context: Context) {
         shouldAllowNavigation: ((url: String, isMainFrame: Boolean) -> Boolean)? = null,
         valueScript: String? = null,
         pageReadyScriptProvider: ((currentUrl: String, html: String, cookies: String) -> String?)? = null,
+        showImmediately: Boolean = false,
     ): Result = mutex.withLock {
         Log.d(TAG, "[WebView] Fetching: $url (IsTV: $isTv)")
         pollingCount = 0
@@ -86,7 +88,7 @@ class WebViewResolver(private val context: Context) {
         val result = withTimeoutOrNull(120000) {
             suspendCancellableCoroutine { continuation ->
                 mainHandler.post {
-                    setupWebView(url, headers, completion, shouldAllowNavigation, valueScript, pageReadyScriptProvider, continuation)
+                    setupWebView(url, headers, completion, shouldAllowNavigation, valueScript, pageReadyScriptProvider, showImmediately, continuation)
                 }
                 continuation.invokeOnCancellation { cleanup() }
             }
@@ -106,6 +108,7 @@ class WebViewResolver(private val context: Context) {
         shouldAllowNavigation: ((url: String, isMainFrame: Boolean) -> Boolean)?,
         valueScript: String?,
         pageReadyScriptProvider: ((currentUrl: String, html: String, cookies: String) -> String?)?,
+        showImmediately: Boolean,
         continuation: kotlinx.coroutines.CancellableContinuation<Result>
     ) {
         webView = WebView(context).apply {
@@ -183,7 +186,7 @@ class WebViewResolver(private val context: Context) {
         }
         Log.d(TAG, "[WebView] Opened")
 
-        if (isTv && completion != null && activityContext != null) {
+        if (showImmediately && activityContext != null) {
             deferredLoadUrl = url
             deferredLoadHeaders = headers
             showVisibleChallenge(continuation)
@@ -240,8 +243,8 @@ class WebViewResolver(private val context: Context) {
             }
 
             // Se dopo 2 polling (circa 3-4 secondi) non c'è contenuto, mostriamo il dialog per sbloccare
-            if (dialog == null && activityContext != null && pollingCount >= 2 && (!hasContent || completion != null)) {
-                Log.d(TAG, "[WebView] Content not found, forcing Visible Challenge UI")
+            if (dialog == null && activityContext != null && (isChallenge || (pollingCount >= 2 && !hasContent))) {
+                Log.d(TAG, "[WebView] Visible challenge UI needed")
                 showVisibleChallenge(continuation)
             }
 
