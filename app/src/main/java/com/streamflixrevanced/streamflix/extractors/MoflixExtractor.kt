@@ -12,7 +12,14 @@ import retrofit2.http.Url
 class MoflixExtractor : Extractor() {
 
     override val name = "Moflix"
-    override val mainUrl = "https://moflix-stream.xyz"
+    override val mainUrl: String
+        get() = MStreamProvider.baseUrl
+    override val aliasUrls = listOf(
+        "https://moflix-stream.xyz",
+        "https://moflix-stream.link",
+        "https://moflix-stream.click",
+        "https://moflix-stream.fans",
+    )
 
     suspend fun servers(videoType: Video.Type): List<Video.Server> {
         val service = Service.build(mainUrl)
