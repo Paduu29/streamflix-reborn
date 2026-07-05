@@ -10,7 +10,7 @@ import retrofit2.Retrofit
 import retrofit2.http.GET
 import retrofit2.http.Url
 import java.net.URL
-import com.streamflixreborn.streamflix.utils.JsUnpacker
+import com.streamflixrevanced.streamflix.utils.JsUnpacker
 
 class UqloadExtractor : Extractor() {
     override val name = "Uqload"

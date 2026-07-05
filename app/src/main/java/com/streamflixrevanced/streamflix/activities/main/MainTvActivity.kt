@@ -23,6 +23,7 @@ import com.streamflixrevanced.streamflix.databinding.ActivityMainTvBinding
 import com.streamflixrevanced.streamflix.databinding.ContentHeaderMenuMainTvBinding
 import com.streamflixrevanced.streamflix.fragments.player.PlayerTvFragment
 import com.streamflixrevanced.streamflix.ui.UpdateAppTvDialog
+import com.streamflixrevanced.streamflix.providers.AnimeOnlineNinjaProvider
 import com.streamflixrevanced.streamflix.providers.IptvProvider
 import com.streamflixrevanced.streamflix.providers.Provider
 import com.streamflixrevanced.streamflix.providers.Cine24hProvider

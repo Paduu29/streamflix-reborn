@@ -29,6 +29,7 @@ import com.streamflixrevanced.streamflix.R
 import com.streamflixrevanced.streamflix.activities.tools.BypassWebViewActivity
 import com.streamflixrevanced.streamflix.databinding.ActivityMainMobileBinding
 import com.streamflixrevanced.streamflix.fragments.player.PlayerMobileFragment
+import com.streamflixrevanced.streamflix.providers.AnimeOnlineNinjaProvider
 import com.streamflixrevanced.streamflix.providers.Cine24hProvider
 import com.streamflixrevanced.streamflix.providers.FilmyOnlineCcProvider
 import com.streamflixrevanced.streamflix.providers.HdFullProvider

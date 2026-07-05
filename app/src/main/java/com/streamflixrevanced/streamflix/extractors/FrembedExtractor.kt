@@ -17,8 +17,8 @@ import kotlinx.coroutines.awaitAll
 import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.Dispatchers
 import android.util.Log
-import com.streamflixreborn.streamflix.providers.FrembedProvider
-import com.streamflixreborn.streamflix.utils.UserPreferences
+import com.streamflixrevanced.streamflix.providers.FrembedProvider
+import com.streamflixrevanced.streamflix.utils.UserPreferences
 
 class FrembedExtractor (var newUrl: String = "") : Extractor() {
 
