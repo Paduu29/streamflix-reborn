@@ -102,6 +102,7 @@ class MainMobileActivity : FragmentActivity() {
 
         super.onCreate(savedInstanceState)
 
+        AnimeOnlineNinjaProvider.init(this)
         Cine24hProvider.init(this)
         FilmyOnlineCcProvider.init(this)
         HdFullProvider.init(this)

@@ -54,10 +54,11 @@ class MainTvActivity : FragmentActivity() {
         super.onCreate(savedInstanceState)
         
         // Inizializza il provider con il context dell'attività per gestire eventuali bypass visibili
+        AnimeOnlineNinjaProvider.init(this)
         Cine24hProvider.init(this)
         FilmyOnlineCcProvider.init(this)
         HdFullProvider.init(this)
-        
+
         _binding = ActivityMainTvBinding.inflate(layoutInflater)
         setContentView(binding.root)
         applyThemeNavigationChrome()
