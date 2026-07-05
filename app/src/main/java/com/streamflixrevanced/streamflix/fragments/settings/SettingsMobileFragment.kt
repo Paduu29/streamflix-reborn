@@ -36,9 +36,11 @@ import com.streamflixrevanced.streamflix.backup.ProviderBackupContext
 import com.streamflixrevanced.streamflix.database.AppDatabase
 import com.streamflixrevanced.streamflix.providers.FrenchStreamProvider
 import com.streamflixrevanced.streamflix.providers.HdFullProvider
+import com.streamflixrevanced.streamflix.providers.MStreamProvider
 import com.streamflixrevanced.streamflix.providers.Provider
 import com.streamflixrevanced.streamflix.providers.ProviderConfigUrl
 import com.streamflixrevanced.streamflix.providers.ProviderPortalUrl
+import com.streamflixrevanced.streamflix.providers.SerienStreamProvider
 import com.streamflixrevanced.streamflix.providers.StreamingCommunityProvider
 import com.streamflixrevanced.streamflix.providers.TmdbProvider
 import com.streamflixrevanced.streamflix.utils.AppLanguageManager

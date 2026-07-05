@@ -13,6 +13,8 @@ import com.streamflixrevanced.streamflix.models.TvShow
 import com.streamflixrevanced.streamflix.models.Video
 import com.streamflixrevanced.streamflix.models.Video.Server
 import com.streamflixrevanced.streamflix.utils.DnsResolver
+import com.streamflixrevanced.streamflix.utils.NetworkClient
+import com.streamflixrevanced.streamflix.utils.UserPreferences
 import okhttp3.Cache
 import okhttp3.HttpUrl.Companion.toHttpUrl
 import okhttp3.OkHttpClient

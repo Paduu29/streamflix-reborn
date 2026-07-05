@@ -3,6 +3,7 @@ package com.streamflixrevanced.streamflix.extractors
 import android.util.Base64
 import androidx.media3.common.MimeTypes
 import com.streamflixrevanced.streamflix.models.Video
+import com.streamflixrevanced.streamflix.providers.MStreamProvider
 import retrofit2.Retrofit
 import retrofit2.converter.gson.GsonConverterFactory
 import retrofit2.http.GET

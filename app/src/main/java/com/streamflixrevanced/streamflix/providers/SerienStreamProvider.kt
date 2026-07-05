@@ -21,6 +21,7 @@ import com.streamflixrevanced.streamflix.models.Video
 import com.streamflixrevanced.streamflix.utils.DnsResolver
 import com.streamflixrevanced.streamflix.utils.NetworkClient
 import com.streamflixrevanced.streamflix.utils.TmdbUtils
+import com.streamflixrevanced.streamflix.utils.UserPreferences
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.first
