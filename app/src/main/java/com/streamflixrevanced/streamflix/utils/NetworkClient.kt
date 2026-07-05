@@ -29,7 +29,7 @@ import java.util.Locale
 object NetworkClient {
 
     private const val TAG = "Cine24hBypass"
-    
+
     // User-Agent Mobile standard per massima compatibilità con Cloudflare
     const val USER_AGENT = "Mozilla/5.0 (Linux; Android 13; Pixel 7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/116.0.0.0 Mobile Safari/537.36"
 
@@ -52,7 +52,7 @@ object NetworkClient {
                     .filter { it.isNotBlank() }
                     .mapNotNull { Cookie.parse(url, it) }
                     .forEach { cookie ->
-                        cookiesByName.putIfAbsent(cookie.name, cookie)
+                        cookiesByName[cookie.name] = cookie
                     }
             }
             return cookiesByName.values.toList()
@@ -63,11 +63,11 @@ object NetworkClient {
         val request = chain.request()
         val host = request.url.host.lowercase(Locale.ROOT)
         val shouldLog = host == "hdfull.one" ||
-            host == "www.hdfull.one" ||
-            host == "hdfull.sbs" ||
-            host == "www.hdfull.sbs" ||
-            host == "hdfullcdn.cc" ||
-            host == "www.hdfullcdn.cc"
+                host == "www.hdfull.one" ||
+                host == "hdfull.sbs" ||
+                host == "www.hdfull.sbs" ||
+                host == "hdfullcdn.cc" ||
+                host == "www.hdfullcdn.cc"
 
         if (shouldLog) {
             Log.d(TAG, "[OkHttp] URL=${request.url}")
@@ -102,7 +102,7 @@ object NetworkClient {
         val sslContext = SSLContext.getInstance("TLS").apply { init(null, trustAllCerts, SecureRandom()) }
         buildClient(DnsResolver.doh) {
             it.sslSocketFactory(sslContext.socketFactory, trustAllCerts[0] as X509TrustManager)
-              .hostnameVerifier { _, _ -> true }
+                .hostnameVerifier { _, _ -> true }
         }
     }
 
@@ -146,7 +146,7 @@ object NetworkClient {
             try {
                 // On older Android we manually inject the Let's Encrypt ISRG Root X1 certificate
                 // and enable older TLS versions just in case.
-                
+
                 val cf = CertificateFactory.getInstance("X.509")
                 val certInput = StreamFlixApp.instance.resources.openRawResource(R.raw.isrg_root_x1)
                 val isrgCert = certInput.use { cf.generateCertificate(it) }
@@ -197,7 +197,7 @@ object NetworkClient {
                 val sslContext = SSLContext.getInstance("TLS").apply {
                     init(null, arrayOf(combinedTrustManager), SecureRandom())
                 }
-                
+
                 builder.sslSocketFactory(sslContext.socketFactory, combinedTrustManager)
             } catch (e: Exception) {
                 Log.e(TAG, "Error setting up SSL compatibility: ${e.message}")
