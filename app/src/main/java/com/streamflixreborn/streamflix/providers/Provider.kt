@@ -65,8 +65,10 @@ interface Provider {
             StreamingCommunityProvider("it") to ProviderSupport(movies = true, tvShows = true),
             StreamingCommunityProvider("en") to ProviderSupport(movies = true, tvShows = true),
             AnimeWorldProvider to ProviderSupport(movies = true, tvShows = true),
+            MkissaProvider to ProviderSupport(movies = true, tvShows = true),
             AniWorldProvider to ProviderSupport(movies = false, tvShows = true),
             RidomoviesProvider to ProviderSupport(movies = true, tvShows = true),
+            AnikotoProvider to ProviderSupport(movies = true, tvShows = true),
             WiflixProvider to ProviderSupport(movies = true, tvShows = true),
             MStreamProvider to ProviderSupport(movies = true, tvShows = true),
             FrenchAnimeProvider to ProviderSupport(movies = true, tvShows = true),
@@ -76,6 +78,7 @@ interface Provider {
             LatanimeProvider to ProviderSupport(movies = true, tvShows = true),
             DoramasflixProvider to ProviderSupport(movies = true, tvShows = true),
             CineCalidadProvider to ProviderSupport(movies = true, tvShows = true),
+            SeriesFlixProvider to ProviderSupport(movies = false, tvShows = true),
             FlixLatamProvider to ProviderSupport(movies = true, tvShows = true),
             LaCartoonsProvider to ProviderSupport(movies = false, tvShows = true),
             AnimefenixProvider to ProviderSupport(movies = false, tvShows = true),
@@ -84,6 +87,7 @@ interface Provider {
             SoloLatinoProvider to ProviderSupport(movies = true, tvShows = true),
             Cine24hProvider to ProviderSupport(movies = true, tvShows = true),
             PelisplustoProvider to ProviderSupport(movies = true, tvShows = true),
+            PelisflixHdProvider to ProviderSupport(movies = true, tvShows = true),
             CableVisionHDProvider to ProviderSupport(movies = false, tvShows = true),
             Altadefinizione01Provider to ProviderSupport(movies = true, tvShows = true),
             GuardaFlixProvider to ProviderSupport(movies = true, tvShows = false),
@@ -112,7 +116,8 @@ interface Provider {
             PlutoTvEsProvider to ProviderSupport(movies = false, tvShows = true),
             PlutoTvFrProvider to ProviderSupport(movies = false, tvShows = true),
             PlutoTvItProvider to ProviderSupport(movies = false, tvShows = true),
-            PlutoTvUsProvider to ProviderSupport(movies = false, tvShows = true)
+            PlutoTvUsProvider to ProviderSupport(movies = false, tvShows = true),
+            CineCityProvider to ProviderSupport(movies = false, tvShows = true)
         )
 
         // Helper functions to check support
