@@ -123,6 +123,10 @@ object AnimeOnlineNinjaProvider : Provider {
             }
 
             CookieManager.getInstance().flush()
+            if (!waitForClearanceCookie(targetUrl, finalUrl)) {
+                challengeSessionReady = false
+                throw ChallengeRequiredException("AnimeOnline Ninja clearance cookie was not visible after WebView completion for $targetUrl")
+            }
             challengeSessionReady = true
             Log.d(TAG, "WebView challenge completed -> finalUrl=$finalUrl")
         }
@@ -134,10 +138,10 @@ object AnimeOnlineNinjaProvider : Provider {
 
         val message = error.message.orEmpty()
         return message.contains("403") ||
-            message.contains("cloudflare", ignoreCase = true) ||
-            message.contains("browser-verification", ignoreCase = true) ||
-            message.contains("challenge", ignoreCase = true) ||
-            message.contains("Just a moment", ignoreCase = true)
+                message.contains("cloudflare", ignoreCase = true) ||
+                message.contains("browser-verification", ignoreCase = true) ||
+                message.contains("challenge", ignoreCase = true) ||
+                message.contains("Just a moment", ignoreCase = true)
     }
 
     private fun challengeEntryUrl(targetUrl: String): String {
@@ -164,12 +168,12 @@ object AnimeOnlineNinjaProvider : Provider {
         }
 
         return html.contains("wp-content", ignoreCase = true) ||
-            html.contains("dooplay", ignoreCase = true) ||
-            html.contains("TPost", ignoreCase = true) ||
-            html.contains("result-item", ignoreCase = true) ||
-            html.contains("module", ignoreCase = true) ||
-            html.contains("episodios", ignoreCase = true) ||
-            html.contains("post-", ignoreCase = true)
+                html.contains("dooplay", ignoreCase = true) ||
+                html.contains("TPost", ignoreCase = true) ||
+                html.contains("result-item", ignoreCase = true) ||
+                html.contains("module", ignoreCase = true) ||
+                html.contains("episodios", ignoreCase = true) ||
+                html.contains("post-", ignoreCase = true)
     }
 
     private fun artworkUrl(url: String?, referer: String = baseUrl): String? {
@@ -190,6 +194,34 @@ object AnimeOnlineNinjaProvider : Provider {
             userAgent = NetworkClient.USER_AGENT,
             accept = "image/avif,image/webp,image/apng,image/svg+xml,image/*,*/*;q=0.8"
         )
+    }
+
+    private suspend fun waitForClearanceCookie(targetUrl: String, finalUrl: String?): Boolean {
+        val cookieManager = CookieManager.getInstance()
+        val candidates = linkedSetOf<String>()
+        listOfNotNull(
+            targetUrl.takeIf { it.isNotBlank() },
+            finalUrl?.takeIf { it.isNotBlank() },
+            challengeEntryUrl(targetUrl),
+            baseUrl,
+            siteRootUrl(targetUrl),
+            siteRootUrl(finalUrl ?: targetUrl),
+        ).forEach { candidate -> candidates += candidate }
+
+        repeat(10) {
+            val cookieHeader = candidates
+                .mapNotNull { candidate -> cookieManager.getCookie(candidate)?.trim() }
+                .firstOrNull { it.isNotBlank() }
+                .orEmpty()
+
+            if (cookieHeader.contains("cf_clearance=", ignoreCase = true)) {
+                return true
+            }
+
+            delay(250)
+        }
+
+        return false
     }
 
     private suspend fun fetchJson(url: String): JSONObject = withContext(Dispatchers.IO) {
@@ -279,8 +311,7 @@ object AnimeOnlineNinjaProvider : Provider {
         } else null
 
         val title = document?.extractDetailTitle() ?: apiMovie?.title ?: id
-        val overview = document?.selectFirst("meta[name='description']")?.attr("content")?.trim()
-            ?: apiMovie?.overview
+        val overview = extractOverview(document, title, apiMovie?.overview)
         val poster = document?.selectFirst("meta[property='og:image']")?.attr("content")?.trim()
             ?.let { artworkUrl(it, url) }
             ?: apiMovie?.poster
@@ -309,20 +340,19 @@ object AnimeOnlineNinjaProvider : Provider {
         if (apiShow != null && document != null) {
             val seasons = parseSeasons(document, url, apiShow.poster)
             val recommendations = document.select("#single_relacionados article, #single_relacionados .item")
-            .mapNotNull { parseListingItem(it) }
-            .filterIsInstance<Show>()
-            .distinctBy { item ->
-                when (item) {
-                    is Movie -> "movie:${item.id}"
-                    is TvShow -> "tv:${item.id}"
+                .mapNotNull { parseListingItem(it) }
+                .filterIsInstance<Show>()
+                .distinctBy { item ->
+                    when (item) {
+                        is Movie -> "movie:${item.id}"
+                        is TvShow -> "tv:${item.id}"
+                    }
                 }
-            }
 
             return TvShow(
                 id = normalizeId(url, "/online/"),
                 title = cleanTitle(document.extractDetailTitle().ifBlank { apiShow.title }),
-                overview = document.selectFirst("meta[name='description']")?.attr("content")?.trim()
-                    ?: apiShow.overview,
+                overview = extractOverview(document, apiShow.title, apiShow.overview),
                 released = document.selectFirst("meta[property='article:published_time']")?.attr("content")?.take(10)
                     ?: apiShow.released?.toString()?.take(10),
                 poster = artworkUrl(document.selectFirst("meta[property='og:image']")?.attr("content")?.trim(), url)
@@ -339,7 +369,7 @@ object AnimeOnlineNinjaProvider : Provider {
 
         val documentFallback = getDocument(url)
         val title = documentFallback.extractDetailTitle().ifBlank { id }
-        val overview = documentFallback.selectFirst("meta[name='description']")?.attr("content")?.trim()
+        val overview = extractOverview(documentFallback, title, apiShow?.overview)
         val poster = artworkUrl(documentFallback.selectFirst("meta[property='og:image']")?.attr("content")?.trim(), url)
         val banner = poster
         val released = documentFallback.selectFirst("meta[property='article:published_time']")?.attr("content")?.take(10)
@@ -734,6 +764,69 @@ object AnimeOnlineNinjaProvider : Provider {
             .trim()
     }
 
+    private fun extractOverview(document: Document?, title: String?, apiOverview: String?): String? {
+        val synopsis = document?.let { extractSynopsisText(it, title) }
+        return synopsis?.takeIf { it.isNotBlank() }
+            ?: apiOverview?.trim()?.takeIf { it.isNotBlank() }
+            ?: document?.selectFirst("meta[name='description']")?.attr("content")?.trim()?.takeIf { it.isNotBlank() }
+    }
+
+    private fun extractSynopsisText(document: Document, title: String?): String? {
+        val heading = document.select("*").firstOrNull { element ->
+            val text = element.ownText().trim()
+            text.equals("Sinopsis", ignoreCase = true) ||
+                    text.startsWith("Sinopsis", ignoreCase = true)
+        } ?: return null
+
+        val synopsisContainer = when {
+            heading.nextElementSibling()?.classNames()?.contains("wp-content") == true -> heading.nextElementSibling()
+            heading.parent()?.classNames()?.contains("wp-content") == true -> heading.parent()
+            else -> heading.nextElementSibling()?.selectFirst(".wp-content")
+                ?: heading.parent()?.selectFirst(".wp-content")
+        }
+
+        synopsisContainer?.select("p, li")?.forEach { block ->
+            val text = block.text().trim().cleanOverviewText(title)
+            if (text != null) return text
+        }
+
+        var sibling = heading.nextElementSibling()
+        var attempts = 0
+        while (sibling != null && attempts < 10) {
+            if (sibling.tagName().equals("p", ignoreCase = true) ||
+                sibling.tagName().equals("li", ignoreCase = true)) {
+                val text = sibling.text().trim().cleanOverviewText(title)
+                if (text != null) return text
+            }
+            sibling = sibling.nextElementSibling()
+            attempts++
+        }
+
+        return null
+    }
+
+    private fun String.cleanOverviewText(title: String?): String? {
+        val normalized = replace(Regex("""\s+"""), " ").trim()
+        if (normalized.isBlank() || normalized.length < 60) return null
+
+        val lower = normalized.lowercase()
+        if (Regex("""^ver\s+.+\s+(online|mega|sub español|audio español)""", RegexOption.IGNORE_CASE).containsMatchIn(normalized)) {
+            return null
+        }
+        if (lower.contains("sakura mail") && lower.contains("online") && lower.contains("descargar") && lower.contains("mega")) {
+            return null
+        }
+        if (lower == title?.lowercase()) return null
+
+        return normalized
+    }
+
+    private fun siteRootUrl(url: String): String? {
+        val host = runCatching { URL(url).host }.getOrNull()?.trim().orEmpty()
+        if (host.isBlank()) return null
+        return "https://$host/"
+    }
+
     private fun Document.extractDetailTitle(): String {
         return selectFirst(".sheader .data h1, .sheader h1, #single h1, main h1, h1[itemprop='name'], meta[property='og:title'], meta[name='twitter:title']")
             ?.let { element ->
@@ -748,8 +841,8 @@ object AnimeOnlineNinjaProvider : Provider {
     private fun looksGenericTitle(title: String): Boolean {
         val normalized = cleanTitle(title)
         return normalized.equals("Ver Anime", ignoreCase = true) ||
-            normalized.contains("Ver Anime", ignoreCase = true) ||
-            normalized.equals(baseUrl.substringAfterLast('/'), ignoreCase = true)
+                normalized.contains("Ver Anime", ignoreCase = true) ||
+                normalized.equals(baseUrl.substringAfterLast('/'), ignoreCase = true)
     }
 
     private fun slugify(value: String): String {
@@ -922,9 +1015,9 @@ object AnimeOnlineNinjaProvider : Provider {
 
     private fun requiresClearance(html: String): Boolean {
         return html.contains("cf-browser-verification", ignoreCase = true) ||
-            html.contains("Just a moment...", ignoreCase = true) ||
-            html.contains("Checking your browser", ignoreCase = true) ||
-            (html.contains("cloudflare", ignoreCase = true) && !html.contains("wp-json/dooplayer", ignoreCase = true))
+                html.contains("Just a moment...", ignoreCase = true) ||
+                html.contains("Checking your browser", ignoreCase = true) ||
+                (html.contains("cloudflare", ignoreCase = true) && !html.contains("wp-json/dooplayer", ignoreCase = true))
     }
 
     private fun itemKey(item: AppAdapter.Item): String {
@@ -977,6 +1070,7 @@ object AnimeOnlineNinjaProvider : Provider {
         }
     }
 }
+
 
 
 
