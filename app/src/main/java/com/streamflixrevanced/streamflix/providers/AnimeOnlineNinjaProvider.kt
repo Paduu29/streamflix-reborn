@@ -20,6 +20,7 @@ import com.streamflixrevanced.streamflix.utils.ArtworkRequestHeaders
 import com.streamflixrevanced.streamflix.utils.NetworkClient
 import com.streamflixrevanced.streamflix.utils.WebViewResolver
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.withContext
