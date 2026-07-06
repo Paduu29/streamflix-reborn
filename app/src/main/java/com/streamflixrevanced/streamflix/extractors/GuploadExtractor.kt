@@ -1,5 +1,4 @@
 package com.streamflixrevanced.streamflix.extractors
-
 import android.util.Base64
 import com.streamflixrevanced.streamflix.models.Video
 import okhttp3.OkHttpClient
@@ -138,10 +137,10 @@ class GuploadExtractor : Extractor() {
     private fun xd(encoded: String, key: String): String? {
         return try {
             if ("~" !in encoded) return null
-            
+
             val b64Data = encoded.substringAfter("~")
             val decodedBytes = Base64.decode(b64Data, Base64.DEFAULT)
-            
+
             val result = StringBuilder()
             for (i in decodedBytes.indices) {
                 val xorChar = decodedBytes[i].toInt() xor key[i % key.length].code
