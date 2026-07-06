@@ -11,7 +11,6 @@ import android.os.Handler
 import android.os.Looper
 import android.os.SystemClock
 import android.util.Log
-import android.view.Gravity
 import android.view.InputDevice
 import android.view.KeyEvent
 import android.view.MotionEvent
@@ -23,7 +22,6 @@ import android.webkit.*
 import android.widget.Button
 import android.widget.FrameLayout
 import android.widget.ImageView
-import android.widget.LinearLayout
 import android.widget.RelativeLayout
 import com.streamflixrevanced.streamflix.R
 import com.streamflixrevanced.streamflix.StreamFlixApp
@@ -46,7 +44,7 @@ class WebViewResolver(private val context: Context) {
     private val mutex = Mutex()
     private val mainHandler = Handler(Looper.getMainLooper())
     private val TAG = "Cine24hBypass"
-    
+
     private var cursorX = 0f
     private var cursorY = 0f
     private var virtualCursor: ImageView? = null
@@ -114,15 +112,15 @@ class WebViewResolver(private val context: Context) {
         webView = WebView(context).apply {
             setBackgroundColor(Color.WHITE)
             // IMPORTANTE: Su TV non deve essere focusable per lasciare il controllo al container
-            isFocusable = !isTv 
+            isFocusable = !isTv
             isFocusableInTouchMode = !isTv
             isClickable = true
-            
+
             // Stabilità Rendering Software per Android TV 9 (come da registro)
             if (isTv) {
                 setLayerType(View.LAYER_TYPE_SOFTWARE, null)
             }
-            
+
             settings.apply {
                 javaScriptEnabled = true
                 domStorageEnabled = true
@@ -204,15 +202,15 @@ class WebViewResolver(private val context: Context) {
         pageReadyScriptProvider: ((currentUrl: String, html: String, cookies: String) -> String?)? = null,
     ) {
         if (continuation.isCompleted || webView == null) return
-        
+
         val cookieManager = CookieManager.getInstance()
         val cookies = cookieManager.getCookie(currentUrl) ?: ""
         val hasClearance = cookies.contains("cf_clearance")
-        
+
         view?.evaluateJavascript("(function() { return document.documentElement.innerHTML; })();") { html ->
             val cleanHtml = html?.trim()?.removeSurrounding("\"")
                 ?.replace("\\u003C", "<")?.replace("\\\"", "\"")?.replace("\\n", "\n") ?: ""
-            
+
             val isChallenge = challengeKeywords.any { cleanHtml.contains(it, ignoreCase = true) }
             val hasContent = cleanHtml.contains("article") || cleanHtml.contains("iframe") || 
                              cleanHtml.contains("TPost") || cleanHtml.contains("grid-item") || 
@@ -315,7 +313,7 @@ class WebViewResolver(private val context: Context) {
                                     }
                                 }
                             }
-                            
+
                             if (event.keyCode == KeyEvent.KEYCODE_BACK) {
                                 Log.d(TAG, "[WebView] BACK Key -> Cancelling bypass")
                                 dialog?.cancel()
@@ -338,7 +336,7 @@ class WebViewResolver(private val context: Context) {
                         setBackgroundColor(Color.parseColor("#4CAF50"))
                         setTextColor(Color.WHITE)
                         textSize = 20f
-                        stateListAnimator = null 
+                        stateListAnimator = null
                         isFocusable = false
                     }
                     val infoParams = RelativeLayout.LayoutParams(-1, 200)
@@ -357,7 +355,7 @@ class WebViewResolver(private val context: Context) {
                     webContainer.addView(webView, FrameLayout.LayoutParams(-1, -1))
 
                     virtualCursor = ImageView(uiContext).apply {
-                        setImageResource(android.R.drawable.ic_menu_mylocation) 
+                        setImageResource(android.R.drawable.ic_menu_mylocation)
                         setColorFilter(Color.RED)
                         layoutParams = FrameLayout.LayoutParams(80, 80)
                         elevation = 100f
@@ -385,7 +383,7 @@ class WebViewResolver(private val context: Context) {
                         cleanup()
                     }
                     .create()
-                
+
                 dialog?.show()
 
                 if (isTv) {
@@ -413,7 +411,7 @@ class WebViewResolver(private val context: Context) {
                 if (!isTv) {
                     dialog?.window?.setSoftInputMode(
                         WindowManager.LayoutParams.SOFT_INPUT_ADJUST_RESIZE or
-                            WindowManager.LayoutParams.SOFT_INPUT_STATE_ALWAYS_VISIBLE
+                                WindowManager.LayoutParams.SOFT_INPUT_STATE_ALWAYS_VISIBLE
                     )
                     webView?.requestFocus(View.FOCUS_DOWN)
                     webView?.post {
