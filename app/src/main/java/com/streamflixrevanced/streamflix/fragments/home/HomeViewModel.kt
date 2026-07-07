@@ -11,6 +11,7 @@ import com.streamflixrevanced.streamflix.models.Episode
 import com.streamflixrevanced.streamflix.models.Movie
 import com.streamflixrevanced.streamflix.models.TvShow
 import com.streamflixrevanced.streamflix.providers.HdFullProvider
+import com.streamflixrevanced.streamflix.providers.AnimeOnlineNinjaProvider
 import com.streamflixrevanced.streamflix.providers.Provider
 import com.streamflixrevanced.streamflix.ui.UserDataNotifier
 import com.streamflixrevanced.streamflix.utils.HomeCacheStore
@@ -421,6 +422,10 @@ class HomeViewModel(database: AppDatabase) : ViewModel() {
                 }
             }
         } else {
+            if (provider is AnimeOnlineNinjaProvider) {
+                HomeCacheStore.clear(appContext, provider)
+            }
+
             val cachedCategories = HomeCacheStore.read(appContext, provider)
             if (!cachedCategories.isNullOrEmpty()) {
                 _state.emit(State.SuccessLoading(cachedCategories))
