@@ -414,10 +414,19 @@ object HdFullProvider : Provider {
             val authFailed = snapshot.code == 403 ||
                 looksLikeLoginPage(document, snapshot.finalUrl) ||
                 looksLikeCloudflarePage(document, snapshot.finalUrl)
+            val looksBlank = looksLikeBlankHdFullPage(document, snapshot.finalUrl)
 
-            if (authFailed) {
+            if (authFailed || looksBlank) {
+                if (looksBlank) {
+                    Log.w(TAG, "HdFull returned blank or unusable HTML -> url=$normalizedUrl")
+                }
+
                 if (snapshot.code == 403 && authenticatedSessionReady) {
                     Log.w(TAG, "OkHttp is blocked after authentication, falling back to WebView fetch -> url=$normalizedUrl")
+                    return fetchDocumentWithWebView(normalizedUrl, headers)
+                }
+
+                if (looksBlank) {
                     return fetchDocumentWithWebView(normalizedUrl, headers)
                 }
 
@@ -760,13 +769,7 @@ object HdFullProvider : Provider {
             completion = { currentUrl, html, _ ->
                 val cloudflare = looksLikeCloudflarePage(html, currentUrl)
                 val loginForm = looksLikeLoginPage(html, currentUrl)
-                val hasUsableHtml = html.length > 1000 &&
-                    (html.contains("home-thumb-item", ignoreCase = true) ||
-                        html.contains("section-title", ignoreCase = true) ||
-                        html.contains("show-poster", ignoreCase = true) ||
-                        html.contains("var ad", ignoreCase = true) ||
-                        html.contains("grid-item", ignoreCase = true) ||
-                        isAuthenticatedPage(currentUrl, html, ""))
+                val hasUsableHtml = hasUsableHdFullHtml(html, currentUrl)
                 Log.d(
                     TAG,
                     "WebView fetch poll -> url=$currentUrl cloudflare=$cloudflare loginForm=$loginForm usable=$hasUsableHtml"
@@ -783,6 +786,48 @@ object HdFullProvider : Provider {
         }
         Log.d(TAG, "WebView fetch succeeded -> url=$url finalUrl=$finalUrl")
         return document
+    }
+
+    private fun hasUsableHdFullHtml(html: String, currentUrl: String): Boolean {
+        val normalizedHtml = html.lowercase(Locale.ROOT)
+        return normalizedHtml.contains("home-thumb-item") ||
+            normalizedHtml.contains("section-title") ||
+            normalizedHtml.contains("show-poster") ||
+            normalizedHtml.contains("show-details") ||
+            normalizedHtml.contains("summary-title") ||
+            normalizedHtml.contains("var ad") ||
+            normalizedHtml.contains("grid-item") ||
+            normalizedHtml.contains("home-slider") ||
+            isAuthenticatedPage(currentUrl, html, "")
+    }
+
+    private fun looksLikeBlankHdFullPage(doc: Document, currentUrl: String): Boolean {
+        val html = doc.outerHtml()
+        val normalizedHtml = html.lowercase(Locale.ROOT)
+        val normalizedUrl = currentUrl.lowercase(Locale.ROOT)
+        if (normalizedHtml.isBlank()) return true
+        if (normalizedHtml.contains("just a moment") || normalizedHtml.contains("cf-browser-verification")) {
+            return false
+        }
+
+        val isDetailsPage = normalizedUrl.contains("/pelicula/") || normalizedUrl.contains("/serie/")
+        val isListingPage = normalizedUrl.contains("/peliculas") ||
+            normalizedUrl.contains("/series") ||
+            normalizedUrl.contains("/tags-") ||
+            normalizedUrl.contains("/genre/")
+
+        val hasDetailsMarkers = normalizedHtml.contains("summary-title") ||
+            normalizedHtml.contains("show-poster") ||
+            normalizedHtml.contains("show-details")
+        val hasListingMarkers = normalizedHtml.contains("home-thumb-item") ||
+            normalizedHtml.contains("section-title") ||
+            normalizedHtml.contains("grid-item")
+
+        return when {
+            isDetailsPage -> !hasDetailsMarkers
+            isListingPage -> !hasListingMarkers
+            else -> normalizedHtml.length < 200
+        }
     }
 
     private object AuthManager {

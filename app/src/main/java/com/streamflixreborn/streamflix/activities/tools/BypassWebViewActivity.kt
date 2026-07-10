@@ -36,6 +36,8 @@ class BypassWebViewActivity : AppCompatActivity() {
         const val EXTRA_URL = "extra_url"
         const val EXTRA_COOKIE_HEADER = "extra_cookie_header"
         private const val COOKIE_POLL_INTERVAL_MS = 1000L
+        private const val INITIAL_SCALE = 85
+        private const val PAGE_ZOOM = "0.85"
     }
 
     private lateinit var webView: WebView
@@ -45,6 +47,7 @@ class BypassWebViewActivity : AppCompatActivity() {
     private lateinit var cancelButton: Button
     private var isCleaningUp = false
     private var currentPageUrl: String? = null
+    private var lastZoomAppliedUrl: String? = null
     private val mainHandler = Handler(Looper.getMainLooper())
     private val cookiePollRunnable = object : Runnable {
         override fun run() {
@@ -136,6 +139,9 @@ class BypassWebViewActivity : AppCompatActivity() {
             databaseEnabled = true
             loadWithOverviewMode = true
             useWideViewPort = true
+            setSupportZoom(true)
+            builtInZoomControls = true
+            displayZoomControls = false
             mixedContentMode = WebSettings.MIXED_CONTENT_COMPATIBILITY_MODE
             userAgentString = NetworkClient.USER_AGENT
             allowFileAccess = false
@@ -143,6 +149,8 @@ class BypassWebViewActivity : AppCompatActivity() {
             javaScriptCanOpenWindowsAutomatically = false
             mediaPlaybackRequiresUserGesture = true
         }
+
+        webView.setInitialScale(INITIAL_SCALE)
 
         webView.webChromeClient = object : WebChromeClient() {
             override fun onProgressChanged(view: WebView?, newProgress: Int) {
@@ -188,6 +196,7 @@ class BypassWebViewActivity : AppCompatActivity() {
                 if (isCleaningUp) return
                 currentPageUrl = url
                 updateBypassState(url)
+                applyMobilePageZoomOnce(view, url)
             }
 
             override fun onReceivedError(
@@ -199,6 +208,24 @@ class BypassWebViewActivity : AppCompatActivity() {
                 updateBypassState(request?.url?.toString())
             }
         }
+    }
+
+    private fun applyMobilePageZoomOnce(view: WebView?, url: String?) {
+        if (view == null || url.isNullOrBlank() || lastZoomAppliedUrl == url) return
+        lastZoomAppliedUrl = url
+        view.evaluateJavascript(
+            """
+                (function() {
+                    const zoom = '$PAGE_ZOOM';
+                    document.documentElement.style.zoom = zoom;
+                    if (document.body) {
+                        document.body.style.zoom = zoom;
+                    }
+                    return zoom;
+                })();
+            """.trimIndent(),
+            null
+        )
     }
 
     private fun updateBypassState(currentUrl: String?) {
