@@ -116,7 +116,7 @@ object FilmeOnlineUkProvider : Provider {
 
         return getOptionalPage(url)
             ?.let { document ->
-                parseArchiveItems(document.select("article.pb-grid-post"), collapseEpisodesToTvShow = true)
+                parseArchiveItems(document.select("article.pb-grid-post"))
             } ?: emptyList()
     }
 
@@ -143,7 +143,8 @@ object FilmeOnlineUkProvider : Provider {
                 runCatching {
                     val document = service.getPage(seriesUrl)
                     val poster = extractPoster(document)
-                    if (parseSeasons(document, seriesUrl, poster).isEmpty()) null else buildTvShow(document, seriesUrl)
+                    val seasons = parseSeasons(document, seriesUrl, poster)
+                    if (seasons.isEmpty()) null else buildTvShow(document, seriesUrl, seasons, poster)
                 }.getOrNull()
             }
     }
@@ -246,19 +247,17 @@ object FilmeOnlineUkProvider : Provider {
     }
 
     private suspend fun parseArchiveItems(
-        elements: List<Element>,
-        collapseEpisodesToTvShow: Boolean = false
+        elements: List<Element>
     ): List<AppAdapter.Item> {
         return coroutineScope {
             elements.map { element ->
-                async { parseArchiveItem(element, collapseEpisodesToTvShow) }
+                async { parseArchiveItem(element) }
             }.awaitAll().filterNotNull()
         }
     }
 
     private suspend fun parseArchiveItem(
-        element: Element,
-        collapseEpisodesToTvShow: Boolean = false
+        element: Element
     ): AppAdapter.Item? {
         val href = element.selectFirst("a[href].post-thumbnail, h2.entry-title a[href]")?.attr("href")
             ?.takeIf { it.isNotBlank() }
@@ -279,8 +278,12 @@ object FilmeOnlineUkProvider : Provider {
                 banner = poster
             )
 
-            collapseEpisodesToTvShow && isEpisodeTitle(title, href) ->
-                resolveTvShowFromEpisode(href, title, poster)
+            isEpisodeTitle(title, href) -> TvShow(
+                id = episodeSeriesUrl(href),
+                title = title,
+                poster = poster,
+                banner = poster
+            )
 
             isTvShowPage(href, title) -> TvShow(
                 id = href,
@@ -320,21 +323,6 @@ object FilmeOnlineUkProvider : Provider {
         return lowerHref.contains("episodul-") || lowerTitle.contains("episodul")
     }
 
-    private suspend fun resolveTvShowFromEpisode(href: String, title: String, poster: String?): TvShow? {
-        val candidates = buildEpisodeSeriesCandidates(href)
-        for (candidate in candidates) {
-            val document = getOptionalPage(candidate) ?: continue
-            if (parseSeasons(document, candidate, extractPoster(document)).isEmpty()) continue
-            val tvShow = buildTvShow(document, candidate)
-            return tvShow.copy(
-                title = tvShow.title.ifBlank { title },
-                poster = poster ?: tvShow.poster,
-                banner = poster ?: tvShow.banner
-            )
-        }
-        return null
-    }
-
     private fun buildEpisodeSeriesCandidates(href: String): List<String> {
         val normalized = normalizeUrl(href)
         val path = normalized
@@ -355,6 +343,10 @@ object FilmeOnlineUkProvider : Provider {
                 add("$baseUrl/$baseSlug/")
             }
         }.distinct()
+    }
+
+    private fun episodeSeriesUrl(href: String): String {
+        return buildEpisodeSeriesCandidates(href).lastOrNull() ?: normalizeUrl(href)
     }
 
     private suspend fun discoverTvShowCandidates(page: Int): List<String> = coroutineScope {
@@ -397,11 +389,15 @@ object FilmeOnlineUkProvider : Provider {
         }
     }
 
-    private fun buildTvShow(document: Document, pageUrl: String): TvShow {
+    private fun buildTvShow(
+        document: Document,
+        pageUrl: String,
+        seasons: List<Season>? = null,
+        poster: String? = extractPoster(document)
+    ): TvShow {
         val pageTitle = extractTitle(document)
-        val poster = extractPoster(document)
         val overview = extractOverview(document)
-        val seasons = parseSeasons(document, pageUrl, poster)
+        val parsedSeasons = seasons ?: parseSeasons(document, pageUrl, poster)
 
         return TvShow(
             id = pageUrl,
@@ -410,7 +406,7 @@ object FilmeOnlineUkProvider : Provider {
             banner = poster,
             overview = overview,
             released = extractPublishedYear(document),
-            seasons = seasons.ifEmpty {
+            seasons = parsedSeasons.ifEmpty {
                 listOf(
                     Season(
                         id = "$pageUrl#season-1",
