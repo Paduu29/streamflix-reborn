@@ -22,7 +22,8 @@ class VavooProvider(override val language: String) : IptvProvider {
             "it" to Triple("it", "IT", listOf("Italy")),
             "fr" to Triple("fr", "FR", listOf("France", "France Sport")),
             "es" to Triple("es", "ES", listOf("Spain")),
-            "pl" to Triple("pl", "PL", listOf("Poland"))
+            "pl" to Triple("pl", "PL", listOf("Poland")),
+            "ro" to Triple("ro", "RO", listOf("Romania")),
         )
 
         private val client = OkHttpClient.Builder()
