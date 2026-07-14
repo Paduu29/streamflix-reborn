@@ -19,6 +19,7 @@ import com.streamflixreborn.streamflix.models.Video
 import com.streamflixreborn.streamflix.utils.NetworkClient
 import com.streamflixreborn.streamflix.utils.WebViewResolver
 import com.streamflixreborn.streamflix.utils.UserPreferences
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.sync.Mutex
@@ -38,6 +39,7 @@ import retrofit2.http.POST
 import retrofit2.http.Url
 import okhttp3.Request
 import okhttp3.HttpUrl.Companion.toHttpUrl
+import kotlin.code
 
 object HdFullProvider : Provider {
 
@@ -165,7 +167,7 @@ object HdFullProvider : Provider {
         "31" to ProviderLink("s", "https://vidoza.net", { "https://vidoza.net/embed-$it-${EMBED_WIDTH}x$EMBED_HEIGHT.html" }) { "https://vidoza.net/$it" },
         "35" to ProviderLink("d", "https://uptobox.com", null) { "https://uptobox.com/$it" },
         "38" to ProviderLink("d", "https://clicknupload.cc", null) { "https://clicknupload.cc/$it" },
-        "40" to ProviderLink("s", "https://vidmoly.me", { "https://vidmoly.biz/embed-$it-${EMBED_WIDTH}x$EMBED_HEIGHT.html" }) { "https://vidmoly.me/w/$it" },
+        "40" to ProviderLink("s", "https://vidmoly.biz", { "https://vidmoly.biz/embed-$it.html" }) { "https://vidmoly.biz/w/$it" },
         "45" to ProviderLink("s", "https://waaw.tv", { "https://hqq.tv/player/embed_player.php?vid=$it&autoplay=no" }) { "https://waaw.tv/f/$it" },
     )
 
@@ -173,7 +175,11 @@ object HdFullProvider : Provider {
         ensureStoredCredentials()
         retryWithAuthRecovery(baseUrl) {
             val doc = fetchDocument(baseUrl, baseUrl)
-            parseHomeCategories(doc)
+            parseHomeCategories(doc).also { categories ->
+                check(categories.isNotEmpty()) {
+                    "HdFull home page contained no recognizable categories"
+                }
+            }
         }
     }
 
@@ -191,10 +197,12 @@ object HdFullProvider : Provider {
 
         return try {
             retryWithAuthRecovery(baseUrl) {
-                val doc = searchWithWebView(query)
+                val doc = searchPreferHttp(query)
                 parseSearchResults(doc)
             }
         } catch (error: MissingCredentialsException) {
+            throw error
+        } catch (error: CancellationException) {
             throw error
         } catch (error: Exception) {
             Log.e(TAG, "search failed", error)
@@ -210,6 +218,8 @@ object HdFullProvider : Provider {
         }
     } catch (error: MissingCredentialsException) {
         throw error
+    } catch (error: CancellationException) {
+        throw error
     } catch (error: Exception) {
         Log.e(TAG, "getMovies failed", error)
         emptyList()
@@ -223,13 +233,18 @@ object HdFullProvider : Provider {
         }
     } catch (error: MissingCredentialsException) {
         throw error
+    } catch (error: CancellationException) {
+        throw error
     } catch (error: Exception) {
         Log.e(TAG, "getTvShows failed", error)
         emptyList()
     }
 
     override suspend fun getMovie(id: String): Movie {
-        val doc = fetchDocument(mediaUrl(id, isMovie = true), mediaUrl(id, isMovie = true))
+        val url = mediaUrl(id, isMovie = true)
+        val doc = retryWithAuthRecovery(url) {
+            fetchDocument(url, baseUrl)
+        }
         return Movie(
             id = id,
             title = doc.selectFirst("#summary-title")?.text().orEmpty(),
@@ -244,7 +259,10 @@ object HdFullProvider : Provider {
     }
 
     override suspend fun getTvShow(id: String): TvShow {
-        val doc = fetchDocument(mediaUrl(id, isMovie = false), mediaUrl(id, isMovie = false))
+        val url = mediaUrl(id, isMovie = false)
+        val doc = retryWithAuthRecovery(url) {
+            fetchDocument(url, baseUrl)
+        }
         val showNumericId = extractShowNumericId(doc).orEmpty()
 
         val poster = doc.selectFirst(".show-poster img")?.absUrl("src")?.normalizeThumb()
@@ -294,13 +312,20 @@ object HdFullProvider : Provider {
 
         return try {
             retryWithAuthRecovery("$baseUrl/serie/$showSlug/temporada-$seasonNumber") {
-                val response = episodesWithWebView(showSlug, showId, seasonNumber)
+                val response = episodesPreferHttp(showSlug, showId, seasonNumber)
                 val array = JSONArray(response)
-                List(array.length()) { index ->
-                    array.getJSONObject(index).toEpisode()
-                }.sortedBy { it.number }
+                buildList {
+                    repeat(array.length()) { index ->
+                        array.optJSONObject(index)?.toEpisode()?.let(::add)
+                    }
+                }
+                    .filter { it.number > 0 }
+                    .distinctBy { it.id }
+                    .sortedBy { it.number }
             }
         } catch (error: MissingCredentialsException) {
+            throw error
+        } catch (error: CancellationException) {
             throw error
         } catch (error: Exception) {
             Log.e(TAG, "getEpisodesBySeason failed", error)
@@ -321,6 +346,8 @@ object HdFullProvider : Provider {
                 )
             }
         } catch (error: MissingCredentialsException) {
+            throw error
+        } catch (error: CancellationException) {
             throw error
         } catch (error: Exception) {
             Log.e(TAG, "getGenre failed", error)
@@ -345,12 +372,26 @@ object HdFullProvider : Provider {
                 document
             }
             val links = decodeLinks(doc)
+            if (links.isEmpty()) {
+                Log.w(TAG, "No HdFull server payload found -> url=$url")
+            }
+            val unknownProviders = links
+                .map { it.provider }
+                .filter { it !in providerMap }
+                .distinct()
+            if (unknownProviders.isNotEmpty()) {
+                Log.w(TAG, "Unsupported HdFull provider ids: ${unknownProviders.joinToString()}")
+            }
             links.mapNotNull { link ->
                 val provider = providerMap[link.provider] ?: return@mapNotNull null
                 if (provider.type != "s") return@mapNotNull null
 
-                val embedUrl = provider.embedBuilder?.invoke(link.code) ?: return@mapNotNull null
-                val host = provider.domain.removePrefix("https://").removePrefix("http://").removePrefix("www.")
+                val embedUrl = link.code
+                    .takeIf { it.startsWith("https://") || it.startsWith("http://") }
+                    ?: provider.embedBuilder?.invoke(link.code)
+                    ?: return@mapNotNull null
+                val host = runCatching { embedUrl.toHttpUrl().host.removePrefix("www.") }
+                    .getOrDefault(provider.domain.removePrefix("https://").removePrefix("http://").removePrefix("www."))
                 val quality = link.quality.ifBlank { "unknown" }
                 val lang = link.lang.ifBlank { "UNK" }
 
@@ -361,6 +402,8 @@ object HdFullProvider : Provider {
                 )
             }.distinctBy { it.src }
         } catch (error: MissingCredentialsException) {
+            throw error
+        } catch (error: CancellationException) {
             throw error
         } catch (error: Exception) {
             Log.e(TAG, "getServers failed", error)
@@ -412,8 +455,8 @@ object HdFullProvider : Provider {
             val snapshot = executeRequest(normalizedUrl, headers)
             val document = snapshot.body.toDocument(snapshot.finalUrl)
             val authFailed = snapshot.code == 403 ||
-                looksLikeLoginPage(document, snapshot.finalUrl) ||
-                looksLikeCloudflarePage(document, snapshot.finalUrl)
+                    looksLikeLoginPage(document, snapshot.finalUrl) ||
+                    looksLikeCloudflarePage(document, snapshot.finalUrl)
             val looksBlank = looksLikeBlankHdFullPage(document, snapshot.finalUrl)
 
             if (authFailed || looksBlank) {
@@ -529,10 +572,10 @@ object HdFullProvider : Provider {
     private fun looksLikeAuthFailure(error: Throwable): Boolean {
         val message = error.message.orEmpty()
         return message.contains("403") ||
-            message.contains("login", ignoreCase = true) ||
-            message.contains("cloudflare", ignoreCase = true) ||
-            message.contains("browser-verification", ignoreCase = true) ||
-            message.contains("verification page", ignoreCase = true)
+                message.contains("login", ignoreCase = true) ||
+                message.contains("cloudflare", ignoreCase = true) ||
+                message.contains("browser-verification", ignoreCase = true) ||
+                message.contains("verification page", ignoreCase = true)
     }
 
     private suspend fun performDeterministicAuthentication(targetUrl: String) {
@@ -548,10 +591,10 @@ object HdFullProvider : Provider {
             Log.d(
                 TAG,
                 "STATE_${state.name} -> STATE_${next.name} url=$currentUrl " +
-                    "cloudflare=${looksLikeCloudflarePage(html, currentUrl)} " +
-                    "loginForm=${looksLikeLoginPage(html, currentUrl)} " +
-                    "logoutTriggered=${next == AuthState.LOGOUT} " +
-                    "loginSucceeded=${next == AuthState.AUTHENTICATED || next == AuthState.DONE}"
+                        "cloudflare=${looksLikeCloudflarePage(html, currentUrl)} " +
+                        "loginForm=${looksLikeLoginPage(html, currentUrl)} " +
+                        "logoutTriggered=${next == AuthState.LOGOUT} " +
+                        "loginSucceeded=${next == AuthState.AUTHENTICATED || next == AuthState.DONE}"
             )
             state = next
         }
@@ -635,9 +678,9 @@ object HdFullProvider : Provider {
                     }
 
                     state == AuthState.LOGIN_PAGE &&
-                        !loginInjected &&
-                        looksLikeLoginPage(html, currentUrl) &&
-                        !looksLikeCloudflarePage(html, currentUrl) -> {
+                            !loginInjected &&
+                            looksLikeLoginPage(html, currentUrl) &&
+                            !looksLikeCloudflarePage(html, currentUrl) -> {
                         loginInjected = true
                         transition(AuthState.AUTO_LOGIN, currentUrl, html)
                         Log.d(TAG, "STATE_AUTO_LOGIN injecting native login automation url=$currentUrl")
@@ -678,6 +721,78 @@ object HdFullProvider : Provider {
         }
     }
 
+    /**
+     * HdFull's search and episode endpoints work with the authenticated cookie jar. Using them
+     * directly avoids starting Chromium for every query/season, while the browser path remains a
+     * fallback for Cloudflare challenges and installations whose cookies are WebView-bound.
+     */
+    private suspend fun searchPreferHttp(query: String): Document {
+        return try {
+            val landing = fetchDocument(baseUrl, baseUrl)
+            val csrf = landing.selectFirst("input[name='__csrf_magic']")
+                ?.attr("value")
+                ?.trim()
+                .orEmpty()
+            check(csrf.isNotBlank()) { "HdFull search CSRF token was missing" }
+
+            val html = service.search(
+                fields = mapOf(
+                    "__csrf_magic" to csrf,
+                    "menu" to "search",
+                    "query" to query,
+                ),
+                headers = searchHeaders(baseUrl),
+            )
+            check(html.isNotBlank()) { "HdFull search HTTP response was empty" }
+            check(!looksLikeLoginPage(html, baseUrl) && !looksLikeCloudflarePage(html, baseUrl)) {
+                "HdFull search HTTP response required browser authentication"
+            }
+
+            Log.d(TAG, "Search HTTP fast path succeeded -> query=$query length=${html.length}")
+            html.toDocument(baseUrl)
+        } catch (error: CancellationException) {
+            throw error
+        } catch (error: Exception) {
+            Log.w(TAG, "Search HTTP fast path unavailable; using WebView -> query=$query", error)
+            searchWithWebView(query)
+        }
+    }
+
+    private suspend fun episodesPreferHttp(showSlug: String, showId: String, seasonNumber: Int): String {
+        val seasonUrl = "$baseUrl/serie/$showSlug/temporada-$seasonNumber"
+        return try {
+            ensureAuthenticatedSession(seasonUrl)
+            val json = service.episodes(
+                fields = mapOf(
+                    "action" to "season",
+                    "start" to "0",
+                    "limit" to "0",
+                    "show" to showId,
+                    "season" to seasonNumber.toString(),
+                    "elang" to "ALL",
+                ),
+                headers = episodesHeaders(seasonUrl),
+            ).trim()
+
+            check(json.startsWith("[")) {
+                "HdFull episodes HTTP response was not JSON: ${json.take(80)}"
+            }
+            // Validate before returning so HTML errors and truncated responses use the fallback.
+            JSONArray(json)
+            Log.d(TAG, "Episodes HTTP fast path succeeded -> show=$showId season=$seasonNumber length=${json.length}")
+            json
+        } catch (error: CancellationException) {
+            throw error
+        } catch (error: Exception) {
+            Log.w(
+                TAG,
+                "Episodes HTTP fast path unavailable; using WebView -> show=$showId season=$seasonNumber",
+                error,
+            )
+            episodesWithWebView(showSlug, showId, seasonNumber)
+        }
+    }
+
     private suspend fun searchWithWebView(query: String): Document {
         val quotedQuery = JSONObject.quote(query)
         val result = getResolver().getResult(
@@ -692,7 +807,7 @@ object HdFullProvider : Provider {
             """.trimIndent(),
             completion = { currentUrl, html, _ ->
                 val done = html.contains("id=\"hdfull-search-result\"", ignoreCase = true) &&
-                    html.contains("data-done=\"1\"", ignoreCase = true)
+                        html.contains("data-done=\"1\"", ignoreCase = true)
                 Log.d(
                     TAG,
                     "Search WebView poll -> url=$currentUrl cloudflare=${looksLikeCloudflarePage(html, currentUrl)} loginForm=${looksLikeLoginPage(html, currentUrl)} done=$done"
@@ -734,7 +849,7 @@ object HdFullProvider : Provider {
             """.trimIndent(),
             completion = { currentUrl, html, _ ->
                 val done = html.contains("id=\"hdfull-episodes-result\"", ignoreCase = true) &&
-                    html.contains("data-done=\"1\"", ignoreCase = true)
+                        html.contains("data-done=\"1\"", ignoreCase = true)
                 Log.d(
                     TAG,
                     "Episodes WebView poll -> url=$currentUrl cloudflare=${looksLikeCloudflarePage(html, currentUrl)} loginForm=${looksLikeLoginPage(html, currentUrl)} done=$done"
@@ -791,14 +906,14 @@ object HdFullProvider : Provider {
     private fun hasUsableHdFullHtml(html: String, currentUrl: String): Boolean {
         val normalizedHtml = html.lowercase(Locale.ROOT)
         return normalizedHtml.contains("home-thumb-item") ||
-            normalizedHtml.contains("section-title") ||
-            normalizedHtml.contains("show-poster") ||
-            normalizedHtml.contains("show-details") ||
-            normalizedHtml.contains("summary-title") ||
-            normalizedHtml.contains("var ad") ||
-            normalizedHtml.contains("grid-item") ||
-            normalizedHtml.contains("home-slider") ||
-            isAuthenticatedPage(currentUrl, html, "")
+                normalizedHtml.contains("section-title") ||
+                normalizedHtml.contains("show-poster") ||
+                normalizedHtml.contains("show-details") ||
+                normalizedHtml.contains("summary-title") ||
+                normalizedHtml.contains("var ad") ||
+                normalizedHtml.contains("grid-item") ||
+                normalizedHtml.contains("home-slider") ||
+                isAuthenticatedPage(currentUrl, html, "")
     }
 
     private fun looksLikeBlankHdFullPage(doc: Document, currentUrl: String): Boolean {
@@ -812,16 +927,16 @@ object HdFullProvider : Provider {
 
         val isDetailsPage = normalizedUrl.contains("/pelicula/") || normalizedUrl.contains("/serie/")
         val isListingPage = normalizedUrl.contains("/peliculas") ||
-            normalizedUrl.contains("/series") ||
-            normalizedUrl.contains("/tags-") ||
-            normalizedUrl.contains("/genre/")
+                normalizedUrl.contains("/series") ||
+                normalizedUrl.contains("/tags-") ||
+                normalizedUrl.contains("/genre/")
 
         val hasDetailsMarkers = normalizedHtml.contains("summary-title") ||
-            normalizedHtml.contains("show-poster") ||
-            normalizedHtml.contains("show-details")
+                normalizedHtml.contains("show-poster") ||
+                normalizedHtml.contains("show-details")
         val hasListingMarkers = normalizedHtml.contains("home-thumb-item") ||
-            normalizedHtml.contains("section-title") ||
-            normalizedHtml.contains("grid-item")
+                normalizedHtml.contains("section-title") ||
+                normalizedHtml.contains("grid-item")
 
         return when {
             isDetailsPage -> !hasDetailsMarkers
@@ -886,7 +1001,16 @@ object HdFullProvider : Provider {
     }
 
     private fun logCookieSnapshot(url: String) {
-        Log.d(TAG, "Cookie snapshot -> url=${normalizeRequestUrl(url)} cookies=${cookieHeaderForLogging(url).ifBlank { "<empty>" }}")
+        val cookieNames = cookieHeaderForLogging(url)
+            .split(';')
+            .map { it.substringBefore('=').trim() }
+            .filter { it.isNotBlank() }
+            .distinct()
+        Log.d(
+            TAG,
+            "Cookie snapshot -> url=${normalizeRequestUrl(url)} " +
+                    "cookieNames=${cookieNames.ifEmpty { listOf("<empty>") }.joinToString()}",
+        )
     }
 
     private fun authHeaders(referer: String): Map<String, String> {
@@ -958,14 +1082,14 @@ object HdFullProvider : Provider {
     private fun looksLikeLoginPage(html: String, currentUrl: String): Boolean {
         val normalizedHtml = html.lowercase(Locale.ROOT)
         return normalizedHtml.contains("popup_login_form") ||
-            normalizedHtml.contains("popup_login_result") ||
-            normalizedHtml.contains("dologin('#popup_login_result')") ||
-            normalizedHtml.contains("input type=\"password\"") ||
-            normalizedHtml.contains("input type='password'") ||
-            normalizedHtml.contains("name=\"password\"") ||
-            normalizedHtml.contains("name='password'") ||
-            normalizedHtml.contains("type=\"submit\"") && normalizedHtml.contains("login") ||
-            normalizedHtml.contains("type='submit'") && normalizedHtml.contains("login")
+                normalizedHtml.contains("popup_login_result") ||
+                normalizedHtml.contains("dologin('#popup_login_result')") ||
+                normalizedHtml.contains("input type=\"password\"") ||
+                normalizedHtml.contains("input type='password'") ||
+                normalizedHtml.contains("name=\"password\"") ||
+                normalizedHtml.contains("name='password'") ||
+                normalizedHtml.contains("type=\"submit\"") && normalizedHtml.contains("login") ||
+                normalizedHtml.contains("type='submit'") && normalizedHtml.contains("login")
     }
 
     private fun looksLikeCloudflarePage(doc: Document, currentUrl: String): Boolean {
@@ -976,30 +1100,30 @@ object HdFullProvider : Provider {
         val normalizedHtml = html.lowercase(Locale.ROOT)
         val url = currentUrl.lowercase(Locale.ROOT)
         return url.contains("/cdn-cgi/") ||
-            normalizedHtml.contains("just a moment") ||
-            normalizedHtml.contains("cf-browser-verification") ||
-            normalizedHtml.contains("challenge-running") ||
-            normalizedHtml.contains("challenges.cloudflare.com")
+                normalizedHtml.contains("just a moment") ||
+                normalizedHtml.contains("cf-browser-verification") ||
+                normalizedHtml.contains("challenge-running") ||
+                normalizedHtml.contains("challenges.cloudflare.com")
     }
 
     private fun isAuthenticatedPage(currentUrl: String, html: String, @Suppress("UNUSED_PARAMETER") cookies: String): Boolean {
         val normalizedHtml = html.lowercase(Locale.ROOT)
         val normalizedUrl = currentUrl.lowercase(Locale.ROOT)
         val hasAuthenticatedUi = normalizedHtml.contains("/logout") ||
-            normalizedHtml.contains("logout") ||
-            normalizedHtml.contains("cerrar sesi") ||
-            normalizedHtml.contains("mi cuenta") ||
-            normalizedHtml.contains("account") ||
-            normalizedHtml.contains("profile") ||
-            normalizedHtml.contains("perfil") ||
-            normalizedHtml.contains("user-menu") ||
-            normalizedHtml.contains("user_panel") ||
-            normalizedHtml.contains("user-panel")
+                normalizedHtml.contains("logout") ||
+                normalizedHtml.contains("cerrar sesi") ||
+                normalizedHtml.contains("mi cuenta") ||
+                normalizedHtml.contains("account") ||
+                normalizedHtml.contains("profile") ||
+                normalizedHtml.contains("perfil") ||
+                normalizedHtml.contains("user-menu") ||
+                normalizedHtml.contains("user_panel") ||
+                normalizedHtml.contains("user-panel")
 
         return hasAuthenticatedUi &&
-            !normalizedUrl.contains("/login") &&
-            !looksLikeLoginPage(html, currentUrl) &&
-            !looksLikeCloudflarePage(html, currentUrl)
+                !normalizedUrl.contains("/login") &&
+                !looksLikeLoginPage(html, currentUrl) &&
+                !looksLikeCloudflarePage(html, currentUrl)
     }
 
     private fun hasStoredCredentials(): Boolean {
@@ -1015,10 +1139,10 @@ object HdFullProvider : Provider {
         val host = runCatching { normalizeUrl(url).toHttpUrl().host.lowercase(Locale.ROOT) }
             .getOrDefault("")
         return host == "hdfull.one" ||
-            host == "www.hdfull.one" ||
-            host == "hdfull.sbs" ||
-            host == "www.hdfull.sbs" ||
-            host == "challenges.cloudflare.com"
+                host == "www.hdfull.one" ||
+                host == "hdfull.sbs" ||
+                host == "www.hdfull.sbs" ||
+                host == "challenges.cloudflare.com"
     }
 
     private fun buildLoginAutomationScript(): String {
@@ -1294,6 +1418,12 @@ object HdFullProvider : Provider {
             }
         }
 
+        if (categories.isEmpty()) {
+            parseCards(doc).takeIf { it.isNotEmpty() }?.let { cards ->
+                categories.add(Category(name = "HdFull", list = cards))
+            }
+        }
+
         return categories
     }
 
@@ -1427,9 +1557,9 @@ object HdFullProvider : Provider {
         val normalized = normalizeUrl(href)
         val host = runCatching { normalized.toHttpUrl().host.lowercase(Locale.ROOT) }.getOrNull().orEmpty()
         return host == "hdfull.one" ||
-            host == "www.hdfull.one" ||
-            host == "hdfull.sbs" ||
-            host == "www.hdfull.sbs"
+                host == "www.hdfull.one" ||
+                host == "hdfull.sbs" ||
+                host == "www.hdfull.sbs"
     }
 
     private fun AppAdapter.Item.cardKey(): String {
@@ -1602,8 +1732,8 @@ object HdFullProvider : Provider {
                     .map { it.value }
                     .firstOrNull { candidate ->
                         candidate.contains("m3u8", ignoreCase = true) ||
-                            candidate.contains("mp4", ignoreCase = true) ||
-                            candidate.contains("video", ignoreCase = true)
+                                candidate.contains("mp4", ignoreCase = true) ||
+                                candidate.contains("video", ignoreCase = true)
                     }
             ).firstOrNull { it?.isNotBlank() == true }
 
@@ -1628,10 +1758,10 @@ object HdFullProvider : Provider {
     private fun looksLikeDirectMediaUrl(url: String): Boolean {
         val lower = url.lowercase(Locale.ROOT)
         return lower.contains(".m3u8") ||
-            lower.contains(".mp4") ||
-            lower.contains(".m4v") ||
-            lower.contains(".webm") ||
-            lower.contains(".mpd")
+                lower.contains(".mp4") ||
+                lower.contains(".m4v") ||
+                lower.contains(".webm") ||
+                lower.contains(".mpd")
     }
 
     private fun directVideo(mediaUrl: String, referer: String): Video {
@@ -1704,14 +1834,28 @@ object HdFullProvider : Provider {
         return String(chars)
     }
 
-    private fun JSONObject.toEpisode(): Episode {
-        val seasonNumber = optString("season").toIntOrNull() ?: 0
-        val episodeNumber = optString("episode").toIntOrNull() ?: 0
-        val permalink = optString("permalink")
-        val episodeUrl = "$baseUrl/serie/$permalink/temporada-$seasonNumber/episodio-$episodeNumber"
-        val titleObject = optJSONObject("title")
-        val title = titleObject?.optString("es").takeUnless { it.isNullOrBlank() }
-            ?: titleObject?.optString("en")
+    private fun JSONObject.toEpisode(): Episode? {
+        val seasonNumber = optString("season").toIntOrNull()
+            ?: optInt("season").takeIf { it > 0 }
+            ?: return null
+        val episodeNumber = optString("episode").toIntOrNull()
+            ?: optInt("episode").takeIf { it > 0 }
+            ?: return null
+        val permalink = optString("permalink").trim().trim('/')
+        if (permalink.isBlank()) return null
+        val episodeUrl = if (permalink.startsWith("http://") || permalink.startsWith("https://")) {
+            permalink
+        } else if (permalink.contains("/temporada-", ignoreCase = true)) {
+            normalizeUrl(permalink)
+        } else {
+            "$baseUrl/serie/$permalink/temporada-$seasonNumber/episodio-$episodeNumber"
+        }
+        val rawTitle = opt("title")
+        val title = when (rawTitle) {
+            is JSONObject -> rawTitle.optString("es").ifBlank { rawTitle.optString("en") }
+            is String -> rawTitle
+            else -> ""
+        }.normalizeDisplayText().ifBlank { null }
         val posterPath = optString("thumbnail").ifBlank {
             optJSONObject("show")?.optString("thumbnail").orEmpty()
         }
@@ -1805,3 +1949,4 @@ object HdFullProvider : Provider {
         }
     }
 }
+
