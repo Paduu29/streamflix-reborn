@@ -1,6 +1,7 @@
 package com.streamflixreborn.streamflix.ui
 
 import android.content.Context
+import android.webkit.CookieManager
 import com.bumptech.glide.Glide
 import com.bumptech.glide.annotation.GlideModule
 import com.bumptech.glide.integration.okhttp3.OkHttpUrlLoader
@@ -9,6 +10,7 @@ import com.bumptech.glide.module.AppGlideModule
 import com.streamflixreborn.streamflix.utils.ArtworkRequestHeaders
 import com.streamflixreborn.streamflix.utils.DnsResolver
 import com.streamflixreborn.streamflix.utils.NetworkClient
+import com.streamflixreborn.streamflix.providers.AnimeOnlineNinjaProvider
 import okhttp3.*
 import okhttp3.OkHttpClient.Builder
 import okhttp3.logging.HttpLoggingInterceptor
@@ -114,7 +116,7 @@ class GlideCustomModule : AppGlideModule() {
                 } else {
                     request
                 }
-                chain.proceed(fixedRequest)
+                chain.proceed(fixedRequest.withAnimeOnlineCookies())
             }
             .addInterceptor(logging)
             .sslSocketFactory(sslContext.socketFactory, trustManager)
@@ -139,6 +141,35 @@ class GlideCustomModule : AppGlideModule() {
 
         override fun loadForRequest(url: HttpUrl): List<Cookie> {
             return NetworkClient.cookieJar.loadForRequest(url)
+        }
+    }
+
+    private fun Request.withAnimeOnlineCookies(): Request {
+        val host = url.host.lowercase(Locale.ROOT)
+        if (host != "ww3.animeonline.ninja" || header("Cookie") != null) return this
+
+        val cookie = animeOnlineCookieHeader(url) ?: return this
+        return newBuilder()
+            .header("Cookie", cookie)
+            .build()
+    }
+
+    private fun animeOnlineCookieHeader(url: HttpUrl): String? {
+        AnimeOnlineNinjaProvider.run {
+            clearanceCookieForGlide()?.takeIf { it.isNotBlank() }?.let { return it }
+        }
+
+        val cookieManager = CookieManager.getInstance()
+        val exact = url.newBuilder().fragment(null).build().toString()
+        val root = url.newBuilder().encodedPath("/").query(null).fragment(null).build().toString()
+
+        return listOf(
+            exact,
+            root,
+            "https://ww3.animeonline.ninja/",
+            "https://ww3.animeonline.ninja"
+        ).firstNotNullOfOrNull { candidate ->
+            cookieManager.getCookie(candidate)?.takeIf { it.isNotBlank() }
         }
     }
 }

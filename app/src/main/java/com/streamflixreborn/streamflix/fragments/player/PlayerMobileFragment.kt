@@ -1511,7 +1511,7 @@ class PlayerMobileFragment : Fragment() {
 
     private fun isSerienStreamBypassUrl(url: String): Boolean {
         return runCatching {
-            Uri.parse(url).host.equals("s.to", ignoreCase = true)
+            Uri.parse(url).host.equals("serienstream.to", ignoreCase = true)
         }.getOrDefault(false)
     }
 

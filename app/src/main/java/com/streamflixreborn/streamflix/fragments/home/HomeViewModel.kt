@@ -11,6 +11,7 @@ import com.streamflixreborn.streamflix.models.Episode
 import com.streamflixreborn.streamflix.models.Movie
 import com.streamflixreborn.streamflix.models.TvShow
 import com.streamflixreborn.streamflix.providers.HdFullProvider
+import com.streamflixreborn.streamflix.providers.AnimeOnlineNinjaProvider
 import com.streamflixreborn.streamflix.providers.Provider
 import com.streamflixreborn.streamflix.ui.UserDataNotifier
 import com.streamflixreborn.streamflix.utils.HomeCacheStore
@@ -375,6 +376,8 @@ class HomeViewModel(database: AppDatabase) : ViewModel() {
             isLoadingHome.set(false)
             return@launch
         }
+
+
         currentProvider = provider
         val appContext = StreamFlixApp.instance.applicationContext
 
@@ -398,6 +401,10 @@ class HomeViewModel(database: AppDatabase) : ViewModel() {
             }
 
             reportedMissingHdFullCredentials.set(false)
+        }
+
+        if (provider is AnimeOnlineNinjaProvider) {
+            HomeCacheStore.clear(appContext, provider)
         }
 
         if (provider is HdFullProvider) {

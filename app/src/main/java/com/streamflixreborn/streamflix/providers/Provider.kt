@@ -84,6 +84,7 @@ interface Provider {
             AnimefenixProvider to ProviderSupport(movies = false, tvShows = true),
             AnimeFlvProvider to ProviderSupport(movies = false, tvShows = true),
             AnimeAv1Provider to ProviderSupport(movies = false, tvShows = true),
+            AnimeOnlineNinjaProvider to ProviderSupport(movies = true, tvShows = true),
             SoloLatinoProvider to ProviderSupport(movies = true, tvShows = true),
             Cine24hProvider to ProviderSupport(movies = true, tvShows = true),
             PelisplustoProvider to ProviderSupport(movies = true, tvShows = true),
@@ -117,7 +118,12 @@ interface Provider {
             PlutoTvFrProvider to ProviderSupport(movies = false, tvShows = true),
             PlutoTvItProvider to ProviderSupport(movies = false, tvShows = true),
             PlutoTvUsProvider to ProviderSupport(movies = false, tvShows = true),
-            CineCityProvider to ProviderSupport(movies = false, tvShows = true)
+            CineCityProvider to ProviderSupport(movies = false, tvShows = true),
+            VavooProvider("de") to ProviderSupport(movies = false, tvShows = true),
+            VavooProvider("it") to ProviderSupport(movies = false, tvShows = true),
+            VavooProvider("fr") to ProviderSupport(movies = false, tvShows = true),
+            VavooProvider("es") to ProviderSupport(movies = false, tvShows = true),
+            VavooProvider("pl") to ProviderSupport(movies = false, tvShows = true)
         )
 
         // Helper functions to check support
