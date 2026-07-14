@@ -34,13 +34,21 @@ open class VidMoLyExtractor : Extractor() {
     }
 
     private fun extractHlsUrl(document: Document): String? {
-        val pattern = Pattern.compile("sources:\\s*\\[\\{file:\\s*\"([^\"]+)\"\\}]")
-        val matcher = pattern.matcher(document.toString())
-        return if (matcher.find()) {
-            matcher.group(1)
-        } else {
-            null
+        val html = document.html()
+        val patterns = listOf(
+            Pattern.compile("""sources\s*:\s*\[\s*\{\s*file\s*:\s*["']([^"']+\.m3u8[^"']*)["']""", Pattern.CASE_INSENSITIVE),
+            Pattern.compile("""(?:file|src|source|url)\s*[:=]\s*["']([^"']+\.m3u8[^"']*)["']""", Pattern.CASE_INSENSITIVE),
+            Pattern.compile("""["'](https?://[^"']+\.m3u8[^"']*)["']""", Pattern.CASE_INSENSITIVE),
+        )
+
+        for (pattern in patterns) {
+            val matcher = pattern.matcher(html)
+            if (matcher.find()) {
+                return matcher.group(1)
+            }
         }
+
+        return null
     }
 
     class ToDomain: VidMoLyExtractor(){
