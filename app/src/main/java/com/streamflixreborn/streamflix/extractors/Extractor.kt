@@ -95,6 +95,7 @@ abstract class Extractor {
             GuploadExtractor(),
             StreamUpExtractor(),
             EinschaltenExtractor(),
+            VidFastExtractor(),
             VidLinkExtractor(),
             VidsrcRuExtractor(),
             VidflixExtractor(),
@@ -122,7 +123,7 @@ abstract class Extractor {
 
         suspend fun extract(link: String, server: Video.Server? = null): Video {
             var finalLink = link
-            
+
             // 1. RISOLUZIONE BRIDGE UNIVERSALE (StreamHG/Sync/Cuevana)
             // Facciamo questo PRIMA di cercare l'estrattore perché il link bridge (es. mysync.mov)
             // non appartiene a nessun estrattore specifico, ma il link risolto sì (es. filemoon).
@@ -132,7 +133,7 @@ abstract class Extractor {
                         .followRedirects(true)
                         .followSslRedirects(true)
                         .build()
-                    
+
                     val responseBody = kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) {
                         val request = okhttp3.Request.Builder()
                             .url(link)
@@ -140,11 +141,11 @@ abstract class Extractor {
                             .build()
                         client.newCall(request).execute().use { it.body?.string() }
                     } ?: ""
-                    
+
                     val redirectUrl = responseBody.substringAfter("window.location.replace(\"", "").substringBefore("\"")
                         .ifEmpty { responseBody.substringAfter("window.location.href = \"", "").substringBefore("\"") }
                         .ifEmpty { responseBody.substringAfter("src=\"", "").substringBefore("\"") }
-                    
+
                     if (redirectUrl.isNotEmpty() && redirectUrl.startsWith("http")) {
                         Log.d("Extractor", "Universal Bridge resolved: $link -> $redirectUrl")
                         finalLink = redirectUrl

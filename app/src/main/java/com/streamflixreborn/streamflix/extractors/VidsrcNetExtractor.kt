@@ -7,7 +7,10 @@ import com.tanasi.retrofit_jsoup.converter.JsoupConverterFactory
 import com.streamflixreborn.streamflix.models.Video
 import com.streamflixreborn.streamflix.utils.DnsResolver
 import com.streamflixreborn.streamflix.utils.UserPreferences
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.withContext
 import okhttp3.OkHttpClient
+import okhttp3.Request
 import org.jsoup.nodes.Document
 import retrofit2.Retrofit
 import retrofit2.http.GET
@@ -18,42 +21,66 @@ import java.util.concurrent.TimeUnit
 class VidsrcNetExtractor : Extractor() {
 
     override val name = "Vidsrc.net"
-    override val mainUrl = "https://vidsrc-embed.ru"
-    override val aliasUrls = listOf("https://vsembed.ru")
+    override val mainUrl = "https://vsembed.su"
+    override val aliasUrls = listOf("https://vsembed.ru", "https://vidsrc-embed.ru")
 
     fun server(videoType: Video.Type): Video.Server {
         return Video.Server(
             id = name,
             name = name,
             src = when (videoType) {
-                is Video.Type.Episode -> "$mainUrl/embed/tv?tmdb=${videoType.tvShow.id}&season=${videoType.season.number}&episode=${videoType.number}"
-                is Video.Type.Movie -> "$mainUrl/embed/movie?tmdb=${videoType.id}"
+                is Video.Type.Episode -> {
+                    val id = videoType.tvShow.imdbId ?: videoType.tvShow.id
+                    val idType = if (videoType.tvShow.imdbId != null) "imdb" else "tmdb"
+                    "$mainUrl/embed/tv?$idType=$id&season=${videoType.season.number}&episode=${videoType.number}"
+                }
+
+                is Video.Type.Movie -> {
+                    val id = videoType.imdbId ?: videoType.id
+                    val idType = if (videoType.imdbId != null) "imdb" else "tmdb"
+                    "$mainUrl/embed/movie?$idType=$id"
+                }
             },
         )
     }
 
     override suspend fun extract(link: String): Video {
         val service = Service.build(mainUrl)
+        val initialDoc = service.get(link)
 
-        val iframedoc = service.get(link)
-            .selectFirst("iframe#player_iframe")?.attr("src")
-            ?.let { if (it.startsWith("//")) "https:$it" else it }
-            ?: throw Exception("Can't retrieve rcp")
+        extractDirectStream(initialDoc.toString(), link, service)?.let { return it }
+
+        val iframeSource = initialDoc.selectFirst("iframe#player_iframe")?.attr("src")
+            ?: Regex("""src\s*:\s*["']([^"']*/(?:pro)?rcp/[^"']+)["']""")
+                .find(initialDoc.toString())?.groupValues?.get(1)
+
+        val iframedoc = iframeSource
+            ?.let { resolveUrl(link, it) }
+            ?: throw Exception("Can't retrieve player iframe or master URLs")
 
         val doc = service.get(iframedoc, link)
-        val prorcp = Regex("src: '(/prorcp/.*?)'")
-            .find(doc.toString())?.groupValues?.get(1)
-            ?.let { iframedoc.substringBefore("/rcp") + it }
-            ?: throw Exception("Can't retrieve prorcp")
+        extractDirectStream(doc.toString(), iframedoc, service)?.let { return it }
 
-        val script = service.get(
-            prorcp,
-            referer = iframedoc
-        ).toString()
+        val prorcp = if (iframedoc.toUri().path?.startsWith("/prorcp/") == true) {
+            iframedoc
+        } else {
+            Regex("""src\s*:\s*["'](/prorcp/[^"']+)["']""")
+                .find(doc.toString())?.groupValues?.get(1)
+                ?.let { baseOrigin(iframedoc) + it }
+                ?: throw Exception("Can't retrieve prorcp")
+        }
+
+        val script = if (prorcp == iframedoc) {
+            doc.toString()
+        } else {
+            service.get(prorcp, referer = iframedoc).toString()
+        }
+
+        extractDirectStream(script, prorcp, service)?.let { return it }
 
         val playerId = Regex("Playerjs.*file: ([a-zA-Z0-9]*?) ,")
             .find(script)?.groupValues?.get(1)
-            ?: "";
+            ?: ""
 
         val decryptedData =
             if (playerId.isNotBlank()) {
@@ -76,22 +103,84 @@ class VidsrcNetExtractor : Extractor() {
             ?.replace(Regex("\\{[a-z]\\d+\\}"), "quibblezoomfable.com")
             ?: throw Exception("No stream found after decryption")
 
-        /* Now try to extract subtitles */
+        return buildVideo(streamUrl, script, iframedoc)
+    }
+
+    private suspend fun extractDirectStream(
+        script: String,
+        playerUrl: String,
+        service: Service,
+    ): Video? {
+        val masterUrls = Regex("""master_urls\s*=\s*["']([^"']+)["']""")
+            .find(script)?.groupValues?.get(1)
+            ?: return null
+
+        val tokens = mutableMapOf<String, String>()
+        val resolvedCandidates = masterUrls.split(" or ")
+            .mapNotNull { candidate ->
+                runCatching {
+                    val placeholder = Regex("__TOKEN(?:PG)?__")
+                    if (!placeholder.containsMatchIn(candidate)) return@runCatching candidate
+
+                    val streamUri = candidate.toUri()
+                    val origin = "${streamUri.scheme}://${streamUri.authority}"
+                    val token = tokens[origin]
+                        ?: service.get("$origin/generate.php", playerUrl).text().trim()
+                            .also { tokens[origin] = it }
+                    if (token.isBlank()) error("Empty stream token from $origin")
+                    candidate.replace(placeholder, token)
+                }.getOrNull()
+            }
+
+        val streamUrl = withContext(Dispatchers.IO) {
+            resolvedCandidates.mapNotNull { candidate ->
+                probePlaylist(candidate, playerUrl)
+            }
+        }
+            .sortedByDescending(PlaylistCandidate::isMediaPlaylist)
+            .firstOrNull()?.url
+            ?: throw Exception("No working VSEmbed playlist found")
+
+        return buildVideo(streamUrl, script, playerUrl)
+    }
+
+    private fun probePlaylist(url: String, playerUrl: String): PlaylistCandidate? {
+        return runCatching {
+            val request = Request.Builder()
+                .url(url)
+                .header("Referer", playerUrl)
+                .header("Origin", baseOrigin(playerUrl))
+                .header("Accept-Encoding", "identity")
+                .build()
+
+            playlistProbeClient.newCall(request).execute().use { response ->
+                if (!response.isSuccessful) return null
+                val manifest = response.body?.string().orEmpty()
+                if (!manifest.lineSequence().any { it.trim() == "#EXTM3U" }) return null
+
+                PlaylistCandidate(
+                    url = url,
+                    isMediaPlaylist = manifest.lineSequence().any {
+                        it.trimStart().startsWith("#EXTINF:")
+                    },
+                )
+            }
+        }.getOrNull()
+    }
+
+    private fun buildVideo(streamUrl: String, script: String, playerUrl: String): Video {
         val regex = Regex(
-                """default_subtitles\s*=\s*["']([^"']+)["']""",
-                RegexOption.DOT_MATCHES_ALL
+            """default_subtitles\s*=\s*["']([^"']+)["']""",
+            RegexOption.DOT_MATCHES_ALL
         )
 
-        val subtitlesRaw = regex.find(script)?.groupValues?.get(1)?:""
+        val subtitlesRaw = regex.find(script)?.groupValues?.get(1) ?: ""
         val subtitles = if (subtitlesRaw.isNotBlank()) {
-            val base = iframedoc.toUri()
-            val baseUrl = "${base.scheme}://${base.host}"
-
             /* Subtitles are selected based on the provider's language, except when the language is English */
             val preferredSubtitle =
                 if (subtitlesRaw.isNotEmpty() &&
                     !UserPreferences.providerLanguage.isNullOrEmpty() && UserPreferences.providerLanguage != "en")
-                        UserPreferences.providerLanguage.orEmpty()
+                    UserPreferences.providerLanguage.orEmpty()
                 else ""
 
             var alreadySet = false
@@ -101,16 +190,16 @@ class VidsrcNetExtractor : Extractor() {
                     val language = item.substringAfter("[")
                         .substringBefore("]")
                     val url = item.substringAfter("]")
-                    if (!url.startsWith("/")) return@mapNotNull null
+                    if (url.isBlank()) return@mapNotNull null
                     Video.Subtitle(
                         label = Html.fromHtml(language).toString(),
-                        file = "${baseUrl}/${url}",
+                        file = resolveUrl(playerUrl, url),
                         default = if (alreadySet == false && preferredSubtitle.isNotEmpty() && language.contains(
                                 preferredSubtitle, ignoreCase = true
-                                    )) {
-                                        alreadySet = true
-                                        true
-                                    } else false
+                            )) {
+                            alreadySet = true
+                            true
+                        } else false
                     )
                 }
         } else emptyList()
@@ -118,10 +207,31 @@ class VidsrcNetExtractor : Extractor() {
             source = streamUrl,
             subtitles = subtitles,
             headers = mapOf(
-                "Referer" to iframedoc
+                "Referer" to playerUrl,
+                "Origin" to baseOrigin(playerUrl),
+                "Accept-Encoding" to "identity",
             ),
         )
     }
+
+    private fun resolveUrl(baseUrl: String, url: String): String {
+        return when {
+            url.startsWith("http://") || url.startsWith("https://") -> url
+            url.startsWith("//") -> "https:$url"
+            url.startsWith("/") -> baseOrigin(baseUrl) + url
+            else -> baseUrl.substringBeforeLast("/", baseUrl) + "/" + url
+        }
+    }
+
+    private fun baseOrigin(url: String): String {
+        val uri = url.toUri()
+        return "${uri.scheme}://${uri.authority}"
+    }
+
+    private data class PlaylistCandidate(
+        val url: String,
+        val isMediaPlaylist: Boolean,
+    )
 
     private fun decrypt(id: String, encrypted: String): String {
         return when (id) {
@@ -293,5 +403,13 @@ class VidsrcNetExtractor : Extractor() {
             @Url url: String,
             @Header("referer") referer: String = ""
         ): Document
+    }
+
+    private companion object {
+        val playlistProbeClient: OkHttpClient = OkHttpClient.Builder()
+            .readTimeout(15, TimeUnit.SECONDS)
+            .connectTimeout(15, TimeUnit.SECONDS)
+            .dns(DnsResolver.doh)
+            .build()
     }
 }
