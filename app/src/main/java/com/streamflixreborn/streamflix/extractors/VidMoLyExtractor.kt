@@ -8,39 +8,59 @@ import retrofit2.http.Header
 import retrofit2.http.Url
 import org.jsoup.nodes.Document
 import okhttp3.OkHttpClient
-import java.util.regex.Pattern
+import java.net.URI
 
 open class VidMoLyExtractor : Extractor() {
     override val name = "VidMoLy"
     override val mainUrl = "https://vidmoly.me/"
-    override val aliasUrls = listOf("https://vidmoly.net")
-    private val redirectUrl = "https://vidmoly.to/"
+    override val aliasUrls = listOf("https://vidmoly.net", "https://vidmoly.biz")
 
     override suspend fun extract(link: String): Video {
-        val service = Service.build(redirectUrl)
+        val origin = URI(link).let { "${it.scheme}://${it.authority}/" }
+        val service = Service.build(origin)
 
-        val document = service.get(link.replace(".me/", ".to/"), redirectUrl)
+        val document = service.get(link, origin)
 
         val hlsUrl = extractHlsUrl(document)
             ?: throw Exception("Could not find HLS source in the webpage")
 
         return Video(
             source = hlsUrl,
+            subtitles = extractSubtitles(document),
             headers = mapOf(
-                "Referer" to redirectUrl,
+                "Referer" to origin,
                 "User-Agent" to USER_AGENT
             )
         )
     }
 
     private fun extractHlsUrl(document: Document): String? {
-        val pattern = Pattern.compile("sources:\\s*\\[\\{file:\\s*\"([^\"]+)\"\\}]")
-        val matcher = pattern.matcher(document.toString())
-        return if (matcher.find()) {
-            matcher.group(1)
-        } else {
-            null
-        }
+        return Regex(
+            """sources\s*:\s*\[\s*\{\s*file\s*:\s*['"]([^'"]+)['"]""",
+            RegexOption.DOT_MATCHES_ALL,
+        ).find(document.toString())?.groupValues?.get(1)
+    }
+
+    private fun extractSubtitles(document: Document): List<Video.Subtitle> {
+        val tracks = Regex(
+            """baseTracks\s*=\s*\[(.*?)]\s*;""",
+            RegexOption.DOT_MATCHES_ALL,
+        ).find(document.toString())?.groupValues?.get(1) ?: return emptyList()
+
+        return runCatching {
+            Regex(
+                """\{[^}]*?file\s*:\s*['"]([^'"]+)['"][^}]*?label\s*:\s*['"]([^'"]+)['"][^}]*?kind\s*:\s*['"]captions['"][^}]*?\}""",
+                RegexOption.DOT_MATCHES_ALL,
+            ).findAll(tracks).map { match ->
+                Video.Subtitle(
+                    label = match.groupValues[2],
+                    file = match.groupValues[1],
+                    default = match.value.contains(
+                        Regex("""["']?default["']?\s*:\s*true"""),
+                    ),
+                )
+            }.toList()
+        }.getOrDefault(emptyList())
     }
 
     class ToDomain: VidMoLyExtractor(){
