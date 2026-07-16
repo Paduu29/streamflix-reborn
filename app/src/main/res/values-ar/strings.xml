@@ -468,6 +468,7 @@
     <string name="settings_app_language_spanish">الإسبانية</string>
     <string name="settings_app_language_french">الفرنسية</string>
     <string name="settings_app_language_italian">الإيطالية</string>
+    <string name="settings_app_language_romanian">الرومانية</string>
     <string name="settings_scan_resolver_camera_permission_denied">مطلوب إذن الكاميرا لمسح رمز QR.</string>
     <string name="settings_scan_resolver_camera_unavailable">لا توجد كاميرا متاحة على هذا الجهاز.</string>
     <string name="backup_import_action">استيراد</string>

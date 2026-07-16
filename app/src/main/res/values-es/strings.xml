@@ -423,6 +423,7 @@
     <string name="settings_app_language_spanish">Español</string>
     <string name="settings_app_language_french">Francés</string>
     <string name="settings_app_language_italian">Italiano</string>
+    <string name="settings_app_language_romanian">Rumano</string>
     <string name="player_settings_gestures_title">Gestos</string>
     <string name="player_settings_keep_screen_on_title">Mantener pantalla encendida en pausa</string>
 

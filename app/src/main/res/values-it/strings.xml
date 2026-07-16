@@ -473,6 +473,7 @@
     <string name="settings_app_language_spanish">Spagnolo</string>
     <string name="settings_app_language_french">Francese</string>
     <string name="settings_app_language_italian">Italiano</string>
+    <string name="settings_app_language_romanian">Rumeno</string>
     <string name="settings_scan_resolver_camera_permission_denied">L autorizzazione fotocamera e necessaria per scansionare il codice QR.</string>
     <string name="settings_scan_resolver_camera_unavailable">Nessuna fotocamera disponibile su questo dispositivo.</string>
     <string name="backup_import_action">Importa</string>
