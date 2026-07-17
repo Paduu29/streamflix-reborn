@@ -141,26 +141,7 @@ object SerialeROProvider : Provider {
         val poster = normalizeImageUrl(document.selectFirst(".col-lg-3 img")?.attr("src"))
         val overview = document.selectFirst(".overwz")?.text()?.trim()
         val (genres, runtime, released) = parseMetadata(document)
-        val seasons = document.select(".sznott a[href]").mapNotNull { anchor ->
-            val href = resolveUrl(url, anchor.attr("href"))
-            val seasonNumber = Regex("""\b(?:S|Sezonul\s*)?(\d+)\b""", RegexOption.IGNORE_CASE)
-                .find(anchor.text())
-                ?.groupValues
-                ?.getOrNull(1)
-                ?.toIntOrNull()
-                ?: Regex("""-s(\d+)$""", RegexOption.IGNORE_CASE).find(href)
-                    ?.groupValues
-                    ?.getOrNull(1)
-                    ?.toIntOrNull()
-                ?: return@mapNotNull null
-
-            Season(
-                id = href,
-                number = seasonNumber,
-                title = "S$seasonNumber",
-                poster = poster
-            )
-        }.distinctBy { it.id }.sortedBy { it.number }
+        val seasons = parseSeasons(document, url, poster)
 
         return TvShow(
             id = url,
@@ -179,20 +160,53 @@ object SerialeROProvider : Provider {
         )
     }
 
+    internal fun parseSeasons(document: Document, pageUrl: String, poster: String?): List<Season> {
+        val explicitSeasons = document.select(".sznott a[href]").mapNotNull { anchor ->
+            val href = resolveUrl(pageUrl, anchor.attr("href"))
+            val seasonNumber = findSeasonNumber(anchor.text(), href)
+                ?: return@mapNotNull null
+
+            Season(
+                id = href,
+                number = seasonNumber,
+                title = "S$seasonNumber",
+                poster = poster
+            )
+        }.distinctBy { it.id }.sortedBy { it.number }
+
+        if (explicitSeasons.isNotEmpty()) return explicitSeasons
+
+        // Some pages only expose one playable episode and omit the season navigation entirely.
+        val seasonNumber = findSeasonNumber(
+            pageUrl,
+            document.title(),
+            document.select("h1.mb-4, h6.ccc, h6.section-title").text(),
+            document.selectFirst("input#season[value]")?.attr("value").orEmpty()
+        )
+            ?: findEmbeddedEpisodes(document, pageUrl).firstOrNull()?.season
+            ?: 1
+        return listOf(
+            Season(
+                id = pageUrl,
+                number = seasonNumber,
+                title = "S$seasonNumber",
+                poster = poster
+            )
+        )
+    }
+
     override suspend fun getEpisodesBySeason(seasonId: String): List<Episode> {
         val url = seasonId
         val document = service.getPage(url)
-        val seasonNumber = Regex("""-s(\d+)$""", RegexOption.IGNORE_CASE)
-            .find(url)
-            ?.groupValues
-            ?.getOrNull(1)
-            ?.toIntOrNull()
-            ?: Regex("""Sezonul\s+(\d+)""", RegexOption.IGNORE_CASE)
-                .find(document.selectFirst("h6.ccc")?.text().orEmpty())
-                ?.groupValues
-                ?.getOrNull(1)
-                ?.toIntOrNull()
-            ?: 1
+        return parseEpisodes(document, url)
+    }
+
+    internal fun parseEpisodes(document: Document, pageUrl: String): List<Episode> {
+        val embeddedEpisodes = findEmbeddedEpisodes(document, pageUrl)
+        val seasonNumber = findSeasonNumber(
+            pageUrl,
+            document.select("h1, h2, h3, h6, title").text()
+        ) ?: embeddedEpisodes.firstOrNull()?.season ?: 1
 
         val episodeUrls = Regex("""["'](\.\./zsrv/srv1eps\?search=[^"']+)["']""")
             .findAll(document.html())
@@ -222,15 +236,55 @@ object SerialeROProvider : Provider {
             )
         }.sortedBy { it.number }
 
-        return if (episodes.isNotEmpty()) episodes else {
+        if (episodes.isNotEmpty()) return episodes
+
+        val matchingEmbeddedEpisodes = embeddedEpisodes.filter { it.season == seasonNumber }
+        if (matchingEmbeddedEpisodes.isNotEmpty()) {
             val poster = normalizeImageUrl(document.selectFirst(".col-lg-3 img")?.attr("src"))
-            episodeUrls.mapIndexed { index, episodeUrl ->
+            return matchingEmbeddedEpisodes.map { embedded ->
                 Episode(
-                    id = episodeUrl,
-                    number = index + 1,
-                    title = "S$seasonNumber - Episodul ${index + 1}",
+                    id = embedded.url,
+                    number = embedded.episode,
+                    title = "S$seasonNumber - Episodul ${embedded.episode}",
                     poster = poster
                 )
+            }
+        }
+
+        val poster = normalizeImageUrl(document.selectFirst(".col-lg-3 img")?.attr("src"))
+        return episodeUrls.mapIndexed { index, episodeUrl ->
+            Episode(
+                id = episodeUrl,
+                number = index + 1,
+                title = "S$seasonNumber - Episodul ${index + 1}",
+                poster = poster
+            )
+        }
+    }
+
+    private data class EmbeddedEpisode(val url: String, val season: Int, val episode: Int)
+
+    private fun findEmbeddedEpisodes(document: Document, pageUrl: String): List<EmbeddedEpisode> {
+        return document.select("iframe[src]").mapNotNull { iframe ->
+            val src = iframe.attr("src").takeIf { it.isNotBlank() } ?: return@mapNotNull null
+            val match = Regex("""(?:^|/)s(\d+)e(\d+)(?:[/?#]|$)""", RegexOption.IGNORE_CASE)
+                .find(src)
+                ?: return@mapNotNull null
+            val season = match.groupValues[1].toIntOrNull() ?: return@mapNotNull null
+            val episode = match.groupValues[2].toIntOrNull() ?: return@mapNotNull null
+            EmbeddedEpisode(resolveUrl(pageUrl, src), season, episode)
+        }.distinctBy { it.url }
+    }
+
+    private fun findSeasonNumber(vararg values: String): Int? {
+        val patterns = listOf(
+            Regex("""(?:Sezonul|Season)\s*[-:#]?\s*(\d+)""", RegexOption.IGNORE_CASE),
+            Regex("""\bS(\d+)\b""", RegexOption.IGNORE_CASE),
+            Regex("""-s(\d+)(?:[/?#]|$)""", RegexOption.IGNORE_CASE)
+        )
+        return values.firstNotNullOfOrNull { value ->
+            patterns.firstNotNullOfOrNull { pattern ->
+                pattern.find(value)?.groupValues?.getOrNull(1)?.toIntOrNull()
             }
         }
     }
