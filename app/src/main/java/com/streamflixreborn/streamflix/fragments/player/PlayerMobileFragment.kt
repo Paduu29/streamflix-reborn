@@ -231,9 +231,6 @@ class PlayerMobileFragment : Fragment() {
     override fun onResume() {
         super.onResume()
         if (!isSetupDone) {
-            requireActivity().requestedOrientation =
-                ActivityInfo.SCREEN_ORIENTATION_SENSOR_LANDSCAPE
-            
             val window = requireActivity().window
             if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.P) {
                 window.attributes.layoutInDisplayCutoutMode = WindowManager.LayoutParams.LAYOUT_IN_DISPLAY_CUTOUT_MODE_SHORT_EDGES
@@ -582,7 +579,6 @@ class PlayerMobileFragment : Fragment() {
             systemBarsBehavior = WindowInsetsControllerCompat.BEHAVIOR_SHOW_TRANSIENT_BARS_BY_SWIPE
             hide(WindowInsetsCompat.Type.systemBars())
         }
-        requireActivity().requestedOrientation = ActivityInfo.SCREEN_ORIENTATION_SENSOR_LANDSCAPE
         when (val type = args.videoType) {
             is Video.Type.Episode -> {
                 nextEpisodeOverlayDismissed = false
