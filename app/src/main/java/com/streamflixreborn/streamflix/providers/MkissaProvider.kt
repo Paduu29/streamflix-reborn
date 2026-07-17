@@ -29,6 +29,7 @@ import retrofit2.converter.scalars.ScalarsConverterFactory
 import retrofit2.HttpException
 import retrofit2.http.Body
 import retrofit2.http.GET
+import retrofit2.http.Header
 import retrofit2.http.Headers
 import retrofit2.http.POST
 import retrofit2.http.Query
@@ -51,11 +52,16 @@ object MkissaProvider : Provider {
     private const val SOURCE_HASH = "d405d0edd690624b66baba3068e0edc3ac90f1597d898a1ec8db4e5c43c00fec"
     private const val GENRE_HASH = "ff61a63ff776f334f80c1e6ad1aa49ef71eab831e235e5d6ec679eae5b83450f"
     private const val IMAGE_URL = "https://aln.youtube-anime.com"
+    private const val CRYPTO_BUILD_ID = "41"
+    private const val CRYPTO_MASK = "5264513ba898cb78c5c646bc1c12f2965a53a99891d91e83a2bf9244c36cca41"
+    private const val CRYPTO_BUCKET_MS = 5 * 60 * 1000L
     private const val HOME_ROW_LIMIT = 20
     private const val HOME_TAG_LIMIT = 20
     private val JSON_MEDIA_TYPE = "application/json; charset=utf-8".toMediaType()
     private val translationTypes = listOf("sub", "dub", "raw")
     private val browseTranslationTypes = listOf("sub", "dub")
+    @Volatile
+    private var cryptoBootstrap: CryptoBootstrap? = null
 
     private val SHOW_FIELDS = """
         _id
@@ -252,7 +258,8 @@ object MkissaProvider : Provider {
         @GET("api")
         suspend fun api(
             @Query("variables") variables: String,
-            @Query("extensions") extensions: String
+            @Query("extensions") extensions: String,
+            @Header("x-build-id") buildId: String = CRYPTO_BUILD_ID
         ): String
 
         @Headers(
@@ -263,7 +270,10 @@ object MkissaProvider : Provider {
             "User-Agent: Mozilla/5.0"
         )
         @POST("api")
-        suspend fun apiPost(@Body body: okhttp3.RequestBody): String
+        suspend fun apiPost(
+            @Body body: okhttp3.RequestBody,
+            @Header("x-build-id") buildId: String = CRYPTO_BUILD_ID
+        ): String
     }
 
     override suspend fun getHome(): List<Category> = coroutineScope {
@@ -619,22 +629,47 @@ object MkissaProvider : Provider {
     }
 
     private suspend fun api(variables: JSONObject, hash: String, fallbackQuery: String? = null): JSONObject {
-        val extensions = JSONObject()
-            .put("persistedQuery", JSONObject().put("version", 1).put("sha256Hash", hash))
-        val response = try {
-            JSONObject(service.api(variables.toString(), extensions.toString()))
-        } catch (error: HttpException) {
-            if (fallbackQuery == null) throw error
-            null
+        val protectedQuery = hash == SOURCE_HASH
+        repeat(if (protectedQuery) 2 else 1) { attempt ->
+            val extensions = JSONObject()
+                .put("persistedQuery", JSONObject().put("version", 1).put("sha256Hash", hash))
+            if (protectedQuery) {
+                extensions.put("aaReq", createCryptoRequest(hash, forceRefresh = attempt > 0))
+            }
+
+            val response = try {
+                JSONObject(service.api(variables.toString(), extensions.toString()))
+            } catch (error: HttpException) {
+                if (fallbackQuery == null) throw error
+                null
+            }
+            if (protectedQuery && response?.hasCryptoError() == true) {
+                if (attempt == 0) {
+                    cryptoBootstrap = null
+                    return@repeat
+                }
+                throw Exception("MKissa rejected the episode crypto token")
+            }
+            if (response != null && !response.shouldRetryWithQueryBody()) return response
+            if (fallbackQuery == null) return response ?: JSONObject()
+
+            val body = JSONObject()
+                .put("query", fallbackQuery)
+                .put("variables", variables)
+                .put("extensions", extensions)
+                .toString()
+                .toRequestBody(JSON_MEDIA_TYPE)
+            val postResponse = JSONObject(service.apiPost(body))
+            if (protectedQuery && postResponse.hasCryptoError()) {
+                if (attempt == 0) {
+                    cryptoBootstrap = null
+                    return@repeat
+                }
+                throw Exception("MKissa rejected the episode crypto token")
+            }
+            return postResponse
         }
-        if (response != null && !response.shouldRetryWithQueryBody()) return response
-        if (fallbackQuery == null) return response ?: JSONObject()
-        val body = JSONObject()
-            .put("query", fallbackQuery)
-            .put("variables", variables)
-            .toString()
-            .toRequestBody(JSON_MEDIA_TYPE)
-        return JSONObject(service.apiPost(body))
+        return JSONObject()
     }
 
     private suspend fun postQuery(query: String, variables: JSONObject): JSONObject {
@@ -701,11 +736,78 @@ object MkissaProvider : Provider {
             .mapNotNull { it as? JSONObject }
             .any { error ->
                 error.optString("message").contains("PersistedQueryNotFound", ignoreCase = true) ||
-                    error.optString("message").contains("PersistedQueryNotSupported", ignoreCase = true) ||
-                    error.optJSONObject("extensions")
-                        ?.optString("code")
-                        ?.contains("PERSISTED_QUERY", ignoreCase = true) == true
+                        error.optString("message").contains("PersistedQueryNotSupported", ignoreCase = true) ||
+                        error.optJSONObject("extensions")
+                            ?.optString("code")
+                            ?.contains("PERSISTED_QUERY", ignoreCase = true) == true
             }
+    }
+
+    private fun JSONObject.hasCryptoError(): Boolean {
+        val errors = optJSONArray("errors") ?: return false
+        return errors.asSequence()
+            .mapNotNull { it as? JSONObject }
+            .any { error ->
+                val message = error.optString("message")
+                message == "AA_CRYPTO_MISSING" ||
+                        message == "AA_CRYPTO_STALE" ||
+                        message == "AA_CRYPTO_EXPIRED" ||
+                        message == "AA_CRYPTO_QUERY_MISMATCH" ||
+                        message == "AA_CRYPTO_BUILD_MISMATCH"
+            }
+    }
+
+    private fun createCryptoRequest(queryHash: String, forceRefresh: Boolean): String {
+        val bootstrap = cryptoBootstrap
+            ?.takeUnless { forceRefresh || System.currentTimeMillis() >= it.switchAt }
+            ?: fetchCryptoBootstrap().also { cryptoBootstrap = it }
+        val timestamp = System.currentTimeMillis() / CRYPTO_BUCKET_MS * CRYPTO_BUCKET_MS
+        val iv = MessageDigest.getInstance("SHA-256")
+            .digest("${bootstrap.epoch}:$CRYPTO_BUILD_ID:$queryHash:$timestamp".toByteArray(Charsets.UTF_8))
+            .copyOfRange(0, 12)
+        val payload = """{"v":1,"ts":$timestamp,"epoch":${bootstrap.epoch},"buildId":"$CRYPTO_BUILD_ID","qh":"$queryHash"}"""
+        val cipher = Cipher.getInstance("AES/GCM/NoPadding")
+        cipher.init(
+            Cipher.ENCRYPT_MODE,
+            SecretKeySpec(bootstrap.key, "AES"),
+            GCMParameterSpec(128, iv)
+        )
+        val encrypted = cipher.doFinal(payload.toByteArray(Charsets.UTF_8))
+        return Base64.encodeToString(byteArrayOf(1) + iv + encrypted, Base64.NO_WRAP)
+    }
+
+    private fun fetchCryptoBootstrap(): CryptoBootstrap {
+        val request = Request.Builder()
+            .url("https://mkissa.to/anime")
+            .header("Accept", "text/html,application/xhtml+xml")
+            .header("User-Agent", "Mozilla/5.0")
+            .build()
+        val html = sourceResolverClient.newCall(request).execute().use { response ->
+            if (!response.isSuccessful) throw Exception("MKissa crypto bootstrap returned HTTP ${response.code}")
+            response.body?.string()
+        } ?: throw Exception("MKissa crypto bootstrap was empty")
+        val markerIndex = html.indexOf("window.__aaCrypto")
+        val valueStart = if (markerIndex >= 0) html.indexOf('=', markerIndex) else -1
+        val valueEnd = if (valueStart >= 0) html.indexOf(';', valueStart + 1) else -1
+        if (valueStart < 0 || valueEnd < 0) throw Exception("MKissa crypto bootstrap was not found")
+        val json = runCatching {
+            JSONObject(html.substring(valueStart + 1, valueEnd).trim())
+        }.getOrElse {
+            throw Exception("MKissa crypto bootstrap is invalid", it)
+        }
+        val epoch = json.optLong("epoch", -1L)
+        val switchAt = json.optLong("switchAt", 0L)
+        val partB = json.optString("partB")
+        if (epoch < 0 || switchAt <= 0 || partB.isBlank()) {
+            throw Exception("MKissa crypto bootstrap is invalid")
+        }
+        val mask = CRYPTO_MASK.chunked(2).map { it.toInt(16).toByte() }.toByteArray()
+        val encodedKey = Base64.decode(partB, Base64.DEFAULT)
+        if (encodedKey.size < 32 || mask.isEmpty()) throw Exception("MKissa crypto key is invalid")
+        val key = ByteArray(32) { index ->
+            (encodedKey[index].toInt() xor mask[index % mask.size].toInt()).toByte()
+        }
+        return CryptoBootstrap(epoch = epoch, switchAt = switchAt, key = key)
     }
 
     private fun parsePopular(response: JSONObject): List<TvShow> {
@@ -902,7 +1004,7 @@ object MkissaProvider : Provider {
     private fun JSONObject.isKnownDeadEmbedSource(): Boolean {
         val source = sourceUrl().lowercase()
         return source.contains("streamsb.net") ||
-            source.contains("streamlare.com")
+                source.contains("streamlare.com")
     }
 
     private suspend fun resolveSourceUrl(value: String): String? {
@@ -977,8 +1079,8 @@ object MkissaProvider : Provider {
             .trim()
             .takeUnless {
                 it.isBlank() ||
-                    it.equals("null", ignoreCase = true) ||
-                    it.equals("undefined", ignoreCase = true)
+                        it.equals("null", ignoreCase = true) ||
+                        it.equals("undefined", ignoreCase = true)
             }
     }
 
@@ -989,8 +1091,8 @@ object MkissaProvider : Provider {
             .map { it.trim() }
             .firstOrNull {
                 it.isNotBlank() &&
-                    !it.equals("null", ignoreCase = true) &&
-                    !it.equals("undefined", ignoreCase = true)
+                        !it.equals("null", ignoreCase = true) &&
+                        !it.equals("undefined", ignoreCase = true)
             }
     }
 
@@ -1002,11 +1104,20 @@ object MkissaProvider : Provider {
 
         val iv = bytes.copyOfRange(1, 13)
         val cipherText = bytes.copyOfRange(13, bytes.size)
-        val key = MessageDigest.getInstance("SHA-256")
+        val rotatingKey = cryptoBootstrap?.key ?: fetchCryptoBootstrap().also { cryptoBootstrap = it }.key
+        val legacyKey = MessageDigest.getInstance("SHA-256")
             .digest("Xot36i3lK3:v$version".toByteArray(Charsets.UTF_8))
-        val cipher = Cipher.getInstance("AES/GCM/NoPadding")
-        cipher.init(Cipher.DECRYPT_MODE, SecretKeySpec(key, "AES"), GCMParameterSpec(128, iv))
-        return JSONObject(String(cipher.doFinal(cipherText), Charsets.UTF_8))
+        val decrypted = sequenceOf(rotatingKey, legacyKey)
+            .mapNotNull { key ->
+                runCatching {
+                    val cipher = Cipher.getInstance("AES/GCM/NoPadding")
+                    cipher.init(Cipher.DECRYPT_MODE, SecretKeySpec(key, "AES"), GCMParameterSpec(128, iv))
+                    cipher.doFinal(cipherText)
+                }.getOrNull()
+            }
+            .firstOrNull()
+            ?: throw Exception("MKissa encrypted payload could not be decrypted")
+        return JSONObject(String(decrypted, Charsets.UTF_8))
     }
 
     private fun JSONArray.asSequence(): Sequence<Any?> = sequence {
@@ -1060,6 +1171,12 @@ object MkissaProvider : Provider {
     private data class AvailableEpisodes(
         val translation: String,
         val count: Int
+    )
+
+    private data class CryptoBootstrap(
+        val epoch: Long,
+        val switchAt: Long,
+        val key: ByteArray
     )
 
     private val fallbackHomeTags = listOf(
