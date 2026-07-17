@@ -364,7 +364,11 @@ class SearchTvFragment : Fragment() {
                 }
             } ?: emptyList()
 
-            Category(name = headerTitle, list = items).apply {
+            Category(
+                name = headerTitle,
+                list = items,
+                stableKey = "global-search:${providerResult.provider.name}",
+            ).apply {
                 itemType = AppAdapter.Type.CATEGORY_TV_ITEM
             }
         }
