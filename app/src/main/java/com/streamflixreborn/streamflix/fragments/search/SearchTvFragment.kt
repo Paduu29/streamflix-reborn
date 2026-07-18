@@ -47,24 +47,30 @@ class SearchTvFragment : Fragment() {
     private var isGlobalSearchChecked: Boolean = false
     private var currentGridColumns: Int = 1
 
-    private val appAdapter by lazy {
+   private val appAdapter by lazy {
         AppAdapter().apply {
             onMovieClickListener = { movie ->
-
-                if (movie.providerName != UserPreferences.currentProvider?.name) {
-                    UserPreferences.currentProvider = Provider.providers.keys.find { it.name == movie.providerName }
-                    Toast.makeText(requireContext(), getString(R.string.switching_to_provider, movie.providerName), Toast.LENGTH_SHORT).show()
-                }
+                movie.providerName
+                    ?.takeIf { it.isNotBlank() && it != UserPreferences.currentProvider?.name }
+                    ?.let { providerName ->
+                        Provider.providers.keys.find { it.name == providerName }?.let { provider ->
+                            UserPreferences.currentProvider = provider
+                            Toast.makeText(requireContext(), getString(R.string.switching_to_provider, providerName), Toast.LENGTH_SHORT).show()
+                        }
+                    }
                 findNavController().navigate(
                     SearchTvFragmentDirections.actionSearchToMovie(id = movie.id)
                 )
             }
             onTvShowClickListener = { tvShow ->
-
-                if (tvShow.providerName != UserPreferences.currentProvider?.name) {
-                    UserPreferences.currentProvider = Provider.providers.keys.find { it.name == tvShow.providerName }
-                    Toast.makeText(requireContext(), getString(R.string.switching_to_provider, tvShow.providerName), Toast.LENGTH_SHORT).show()
-                }
+                tvShow.providerName
+                    ?.takeIf { it.isNotBlank() && it != UserPreferences.currentProvider?.name }
+                    ?.let { providerName ->
+                        Provider.providers.keys.find { it.name == providerName }?.let { provider ->
+                            UserPreferences.currentProvider = provider
+                            Toast.makeText(requireContext(), getString(R.string.switching_to_provider, providerName), Toast.LENGTH_SHORT).show()
+                        }
+                    }
                 findNavController().navigate(
                     SearchTvFragmentDirections.actionSearchToTvShow(
                         id = tvShow.id,
