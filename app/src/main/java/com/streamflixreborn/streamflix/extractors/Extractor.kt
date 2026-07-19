@@ -96,6 +96,7 @@ abstract class Extractor {
             StreamUpExtractor(),
             EinschaltenExtractor(),
             VidLinkExtractor(),
+            ScreenscapeExtractor(),
             VidsrcRuExtractor(),
             VidflixExtractor(),
             VidrockExtractor(),
