@@ -2,6 +2,7 @@ package com.streamflixreborn.streamflix.providers
 
 import android.util.Base64
 import android.util.Log
+import com.streamflixreborn.streamflix.StreamFlixApp
 import com.streamflixreborn.streamflix.adapters.AppAdapter
 import com.streamflixreborn.streamflix.extractors.Extractor
 import com.streamflixreborn.streamflix.models.Category
@@ -52,8 +53,12 @@ object MkissaProvider : Provider {
     private const val SOURCE_HASH = "d405d0edd690624b66baba3068e0edc3ac90f1597d898a1ec8db4e5c43c00fec"
     private const val GENRE_HASH = "ff61a63ff776f334f80c1e6ad1aa49ef71eab831e235e5d6ec679eae5b83450f"
     private const val IMAGE_URL = "https://aln.youtube-anime.com"
-    private const val CRYPTO_BUILD_ID = "41"
-    private const val CRYPTO_MASK = "5264513ba898cb78c5c646bc1c12f2965a53a99891d91e83a2bf9244c36cca41"
+    private const val FALLBACK_CRYPTO_BUILD_ID = "45"
+    private const val FALLBACK_CRYPTO_MASK = "b5aa3f32a24c324a81e3ab5b35d35f9111ca1c39eb26d40a1ad76a37c5d956b9"
+    private const val CRYPTO_PREFS = "mkissa_crypto"
+    private const val CRYPTO_BUILD_KEY = "build_id"
+    private const val CRYPTO_MASK_KEY = "mask"
+    private const val CRYPTO_KEY_KEY = "key"
     private const val CRYPTO_BUCKET_MS = 5 * 60 * 1000L
     private const val HOME_ROW_LIMIT = 20
     private const val HOME_TAG_LIMIT = 20
@@ -259,7 +264,7 @@ object MkissaProvider : Provider {
         suspend fun api(
             @Query("variables") variables: String,
             @Query("extensions") extensions: String,
-            @Header("x-build-id") buildId: String = CRYPTO_BUILD_ID
+            @Header("x-build-id") buildId: String
         ): String
 
         @Headers(
@@ -272,7 +277,7 @@ object MkissaProvider : Provider {
         @POST("api")
         suspend fun apiPost(
             @Body body: okhttp3.RequestBody,
-            @Header("x-build-id") buildId: String = CRYPTO_BUILD_ID
+            @Header("x-build-id") buildId: String
         ): String
     }
 
@@ -631,6 +636,11 @@ object MkissaProvider : Provider {
     private suspend fun api(variables: JSONObject, hash: String, fallbackQuery: String? = null): JSONObject {
         val protectedQuery = hash == SOURCE_HASH
         repeat(if (protectedQuery) 2 else 1) { attempt ->
+            val crypto = if (protectedQuery) {
+                getCryptoBootstrap(forceRefresh = attempt > 0)
+            } else {
+                null
+            }
             val extensions = JSONObject()
                 .put("persistedQuery", JSONObject().put("version", 1).put("sha256Hash", hash))
             if (protectedQuery) {
@@ -638,14 +648,20 @@ object MkissaProvider : Provider {
             }
 
             val response = try {
-                JSONObject(service.api(variables.toString(), extensions.toString()))
+                JSONObject(
+                    service.api(
+                        variables.toString(),
+                        extensions.toString(),
+                        crypto?.buildId ?: currentCryptoBuildId()
+                    )
+                )
             } catch (error: HttpException) {
                 if (fallbackQuery == null) throw error
                 null
             }
             if (protectedQuery && response?.hasCryptoError() == true) {
                 if (attempt == 0) {
-                    cryptoBootstrap = null
+                    invalidateCryptoBootstrap()
                     return@repeat
                 }
                 throw Exception("MKissa rejected the episode crypto token")
@@ -659,10 +675,10 @@ object MkissaProvider : Provider {
                 .put("extensions", extensions)
                 .toString()
                 .toRequestBody(JSON_MEDIA_TYPE)
-            val postResponse = JSONObject(service.apiPost(body))
+            val postResponse = JSONObject(service.apiPost(body, crypto?.buildId ?: currentCryptoBuildId()))
             if (protectedQuery && postResponse.hasCryptoError()) {
                 if (attempt == 0) {
-                    cryptoBootstrap = null
+                    invalidateCryptoBootstrap()
                     return@repeat
                 }
                 throw Exception("MKissa rejected the episode crypto token")
@@ -678,7 +694,7 @@ object MkissaProvider : Provider {
             .put("variables", variables)
             .toString()
             .toRequestBody(JSON_MEDIA_TYPE)
-        return JSONObject(service.apiPost(body))
+        return JSONObject(service.apiPost(body, currentCryptoBuildId()))
     }
 
     private fun parseShows(response: JSONObject): List<TvShow> {
@@ -758,14 +774,12 @@ object MkissaProvider : Provider {
     }
 
     private fun createCryptoRequest(queryHash: String, forceRefresh: Boolean): String {
-        val bootstrap = cryptoBootstrap
-            ?.takeUnless { forceRefresh || System.currentTimeMillis() >= it.switchAt }
-            ?: fetchCryptoBootstrap().also { cryptoBootstrap = it }
+        val bootstrap = getCryptoBootstrap(forceRefresh)
         val timestamp = System.currentTimeMillis() / CRYPTO_BUCKET_MS * CRYPTO_BUCKET_MS
         val iv = MessageDigest.getInstance("SHA-256")
-            .digest("${bootstrap.epoch}:$CRYPTO_BUILD_ID:$queryHash:$timestamp".toByteArray(Charsets.UTF_8))
+            .digest("${bootstrap.epoch}:${bootstrap.buildId}:$queryHash:$timestamp".toByteArray(Charsets.UTF_8))
             .copyOfRange(0, 12)
-        val payload = """{"v":1,"ts":$timestamp,"epoch":${bootstrap.epoch},"buildId":"$CRYPTO_BUILD_ID","qh":"$queryHash"}"""
+        val payload = """{"v":1,"ts":$timestamp,"epoch":${bootstrap.epoch},"buildId":"${bootstrap.buildId}","qh":"$queryHash"}"""
         val cipher = Cipher.getInstance("AES/GCM/NoPadding")
         cipher.init(
             Cipher.ENCRYPT_MODE,
@@ -774,6 +788,70 @@ object MkissaProvider : Provider {
         )
         val encrypted = cipher.doFinal(payload.toByteArray(Charsets.UTF_8))
         return Base64.encodeToString(byteArrayOf(1) + iv + encrypted, Base64.NO_WRAP)
+    }
+
+    private fun currentCryptoBuildId(): String {
+        return loadStoredCryptoConfig()?.buildId ?: FALLBACK_CRYPTO_BUILD_ID
+    }
+
+    private fun getCryptoBootstrap(forceRefresh: Boolean): CryptoBootstrap {
+        val cached = cryptoBootstrap
+            ?.takeUnless { forceRefresh || System.currentTimeMillis() >= it.switchAt }
+            ?: loadStoredCryptoConfig()
+                ?.takeUnless { forceRefresh || System.currentTimeMillis() >= it.switchAt }
+        if (cached != null) {
+            cryptoBootstrap = cached
+            return cached
+        }
+
+        return fetchCryptoBootstrap().also {
+            cryptoBootstrap = it
+            saveStoredCryptoConfig(it)
+        }
+    }
+
+    private fun invalidateCryptoBootstrap() {
+        cryptoBootstrap = null
+        runCatching {
+            StreamFlixApp.instance
+                .getSharedPreferences(CRYPTO_PREFS, android.content.Context.MODE_PRIVATE)
+                .edit()
+                .clear()
+                .apply()
+        }
+    }
+
+    private fun loadStoredCryptoConfig(): CryptoBootstrap? {
+        return runCatching {
+            val prefs = StreamFlixApp.instance
+                .getSharedPreferences(CRYPTO_PREFS, android.content.Context.MODE_PRIVATE)
+            val buildId = prefs.getString(CRYPTO_BUILD_KEY, null)?.takeIf { it.isNotBlank() }
+                ?: return null
+            val mask = prefs.getString(CRYPTO_MASK_KEY, null)?.hexBytes() ?: return null
+            val key = prefs.getString(CRYPTO_KEY_KEY, null)?.hexBytes() ?: return null
+            if (mask.isEmpty() || key.size != 32) return null
+            CryptoBootstrap(
+                epoch = prefs.getLong("epoch", -1L),
+                switchAt = prefs.getLong("switch_at", 0L),
+                buildId = buildId,
+                mask = mask,
+                key = key
+            )
+        }.getOrNull()
+    }
+
+    private fun saveStoredCryptoConfig(config: CryptoBootstrap) {
+        runCatching {
+            StreamFlixApp.instance
+                .getSharedPreferences(CRYPTO_PREFS, android.content.Context.MODE_PRIVATE)
+                .edit()
+                .putString(CRYPTO_BUILD_KEY, config.buildId)
+                .putString(CRYPTO_MASK_KEY, config.mask.toHex())
+                .putString(CRYPTO_KEY_KEY, config.key.toHex())
+                .putLong("epoch", config.epoch)
+                .putLong("switch_at", config.switchAt)
+                .apply()
+        }
     }
 
     private fun fetchCryptoBootstrap(): CryptoBootstrap {
@@ -801,13 +879,67 @@ object MkissaProvider : Provider {
         if (epoch < 0 || switchAt <= 0 || partB.isBlank()) {
             throw Exception("MKissa crypto bootstrap is invalid")
         }
-        val mask = CRYPTO_MASK.chunked(2).map { it.toInt(16).toByte() }.toByteArray()
+        val bundleCrypto = fetchBundleCryptoConfig(html)
+        val mask = bundleCrypto?.mask ?: FALLBACK_CRYPTO_MASK.hexBytes()
+            ?: throw Exception("MKissa crypto mask is invalid")
+        val buildId = bundleCrypto?.buildId ?: FALLBACK_CRYPTO_BUILD_ID
         val encodedKey = Base64.decode(partB, Base64.DEFAULT)
         if (encodedKey.size < 32 || mask.isEmpty()) throw Exception("MKissa crypto key is invalid")
         val key = ByteArray(32) { index ->
             (encodedKey[index].toInt() xor mask[index % mask.size].toInt()).toByte()
         }
-        return CryptoBootstrap(epoch = epoch, switchAt = switchAt, key = key)
+        return CryptoBootstrap(epoch = epoch, switchAt = switchAt, buildId = buildId, mask = mask, key = key)
+    }
+
+    private fun fetchBundleCryptoConfig(html: String): BundleCryptoConfig? {
+        val entryUrl = Regex("""https://[^\"']+/entry/app\.[^\"']+\.js""")
+            .find(html)
+            ?.value
+            ?: return null
+        val app = runCatching {
+            sourceResolverClient.newCall(
+                Request.Builder()
+                    .url(entryUrl)
+                    .header("Accept", "application/javascript")
+                    .header("User-Agent", "Mozilla/5.0")
+                    .build()
+            ).execute().use { response ->
+                if (!response.isSuccessful) null else response.body?.string()
+            }
+        }.getOrNull() ?: return null
+
+        val assetBase = entryUrl.substringBeforeLast("/entry/")
+        val chunkUrls = Regex("""\.\./chunks/[^\"']+\.js""")
+            .findAll(app)
+            .map { "$assetBase/${it.value.removePrefix("../")}" }
+            .distinct()
+            .toList()
+        val scripts = sequenceOf(app) + chunkUrls.asSequence().mapNotNull { url ->
+            runCatching {
+                sourceResolverClient.newCall(
+                    Request.Builder()
+                        .url(url)
+                        .header("Accept", "application/javascript")
+                        .header("User-Agent", "Mozilla/5.0")
+                        .build()
+                ).execute().use { response ->
+                    if (!response.isSuccessful) null else response.body?.string()
+                }
+            }.getOrNull()
+        }
+        val script = scripts.firstOrNull { it.contains("const bd=") && it.contains("aaReq") } ?: return null
+        val mask = Regex("""const bd=\"([0-9a-fA-F]{64})\"""")
+            .find(script)
+            ?.groupValues
+            ?.getOrNull(1)
+            ?.hexBytes()
+            ?: return null
+        val buildId = Regex("""fr=.*?\"(\d+)\"""")
+            .find(script)
+            ?.groupValues
+            ?.getOrNull(1)
+            ?: return null
+        return BundleCryptoConfig(buildId = buildId, mask = mask)
     }
 
     private fun parsePopular(response: JSONObject): List<TvShow> {
@@ -1035,6 +1167,57 @@ object MkissaProvider : Provider {
     }
 
     private suspend fun resolveAllanimeClockSource(path: String): String? {
+        val normalizedPath = when {
+            path.contains("/apivtwo/clock.json", ignoreCase = true) -> path
+            path.contains("/apivtwo/clock?", ignoreCase = true) ->
+                path.replace("/apivtwo/clock?", "/apivtwo/clock.json?", ignoreCase = true)
+            else -> return null
+        }
+        val requestUrl = "$CLOCK_URL$normalizedPath" +
+                if (normalizedPath.contains("referer=", ignoreCase = true)) "" else "&referer="
+        val request = Request.Builder()
+            .url(requestUrl)
+            .header("Accept", "application/json, text/plain, */*")
+            .header("Origin", "https://allanime.to")
+            .header("Referer", "https://allanime.to/")
+            .header("User-Agent", "Mozilla/5.0")
+            .build()
+        val body = sourceResolverClient.newCall(request).execute().use { response ->
+            if (!response.isSuccessful) return null
+            response.body?.string()
+        } ?: return null
+        return findClockLinks(body).firstOrNull()
+    }
+
+    private fun findClockLinks(body: String): Sequence<String> = sequence {
+        val root: Any = runCatching { JSONObject(body) }.getOrNull()
+            ?: runCatching { JSONArray(body) }.getOrNull()
+            ?: return@sequence
+        yieldAll(findClockLinks(root))
+    }
+
+    private fun findClockLinks(value: Any): Sequence<String> = sequence {
+        when (value) {
+            is JSONObject -> value.keys().forEach { key ->
+                val child = value.opt(key)
+                if (key.equals("link", true) || key.equals("url", true) ||
+                    key.equals("sourceUrl", true) || key.equals("file", true) ||
+                    key.equals("hls", true) || key.equals("mp4", true)
+                ) {
+                    val link = child as? String
+                    if (!link.isNullOrBlank() && link.startsWith("http", true)) yield(link)
+                }
+                if (child is JSONObject || child is JSONArray) yieldAll(findClockLinks(child))
+            }
+            is JSONArray -> for (index in 0 until value.length()) {
+                val child = value.opt(index)
+                if (child is JSONObject || child is JSONArray) yieldAll(findClockLinks(child))
+                else if (child is String && child.startsWith("http", true)) yield(child)
+            }
+        }
+    }
+
+    /*
         val normalizedPath = path.replace("/apivtwo/clock?", "/apivtwo/clock.json?")
         val request = Request.Builder()
             .url("$CLOCK_URL$normalizedPath")
@@ -1061,8 +1244,7 @@ object MkissaProvider : Provider {
             if (!link.isNullOrBlank()) return link
         }
 
-        return null
-    }
+        return null*/
 
     private fun directPlaybackHeaders(): Map<String, String> {
         return mapOf(
@@ -1104,7 +1286,10 @@ object MkissaProvider : Provider {
 
         val iv = bytes.copyOfRange(1, 13)
         val cipherText = bytes.copyOfRange(13, bytes.size)
-        val rotatingKey = cryptoBootstrap?.key ?: fetchCryptoBootstrap().also { cryptoBootstrap = it }.key
+        val rotatingKey = cryptoBootstrap?.key ?: fetchCryptoBootstrap().also {
+            cryptoBootstrap = it
+            saveStoredCryptoConfig(it)
+        }.key
         val legacyKey = MessageDigest.getInstance("SHA-256")
             .digest("Xot36i3lK3:v$version".toByteArray(Charsets.UTF_8))
         val decrypted = sequenceOf(rotatingKey, legacyKey)
@@ -1122,6 +1307,17 @@ object MkissaProvider : Provider {
 
     private fun JSONArray.asSequence(): Sequence<Any?> = sequence {
         for (i in 0 until length()) yield(opt(i))
+    }
+
+    private fun String.hexBytes(): ByteArray? {
+        if (length % 2 != 0 || isBlank()) return null
+        return runCatching {
+            chunked(2).map { it.toInt(16).toByte() }.toByteArray()
+        }.getOrNull()
+    }
+
+    private fun ByteArray.toHex(): String {
+        return joinToString("") { "%02x".format(it.toInt() and 0xff) }
     }
 
     private fun currentAnimeSeason(month: Int): String {
@@ -1176,7 +1372,14 @@ object MkissaProvider : Provider {
     private data class CryptoBootstrap(
         val epoch: Long,
         val switchAt: Long,
+        val buildId: String,
+        val mask: ByteArray,
         val key: ByteArray
+    )
+
+    private data class BundleCryptoConfig(
+        val buildId: String,
+        val mask: ByteArray
     )
 
     private val fallbackHomeTags = listOf(
