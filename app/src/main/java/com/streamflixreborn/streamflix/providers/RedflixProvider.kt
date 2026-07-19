@@ -83,7 +83,7 @@ object RedflixProvider : Provider {
         if (query.isBlank()) {
             return genreShortcuts.map { (id, name) -> Genre(id, name) }
         }
-        return service.search(query, page).items()
+        return service.searchMulti(query = query, page = page).results()
     }
 
     override suspend fun getMovies(page: Int): List<Movie> =
@@ -173,7 +173,9 @@ object RedflixProvider : Provider {
 
     private fun JsonObject.results(isMovie: Boolean? = null): List<AppAdapter.Item> =
         array("results").mapNotNull { item ->
-            val movie = item.stringOrNull("media_type") == "movie" || item.has("title")
+            val mediaType = item.stringOrNull("media_type")
+            if (mediaType != null && mediaType !in setOf("movie", "tv")) return@mapNotNull null
+            val movie = mediaType == "movie" || (mediaType == null && item.has("title"))
             if (isMovie != null && movie != isMovie) return@mapNotNull null
             if (movie) {
                 Movie(
@@ -265,7 +267,13 @@ object RedflixProvider : Provider {
         @GET("/") suspend fun home(): Document
         @GET("movies") suspend fun movies(@Query("page") page: Int = 1): Document
         @GET("tv-shows") suspend fun tvShows(@Query("page") page: Int = 1): Document
-        @GET("browse") suspend fun search(@Query("q") query: String, @Query("page") page: Int = 1): Document
+        @GET("api/tmdb/search/multi")
+        suspend fun searchMulti(
+            @Query("api_key") apiKey: String = "",
+            @Query("query") query: String,
+            @Query("page") page: Int = 1,
+            @Query("language") language: String = "en-US",
+        ): JsonObject
         @GET("api/tmdb/trending/all/day") suspend fun trendingDay(@Query("language") language: String = "en-US"): JsonObject
         @GET("api/tmdb/trending/all/week") suspend fun trendingWeek(@Query("language") language: String = "en-US"): JsonObject
         @GET("api/tmdb/discover/movie") suspend fun newReleasesMovies(@Query("sort_by") sort: String = "primary_release_date.desc", @Query("language") language: String = "en-US"): JsonObject
