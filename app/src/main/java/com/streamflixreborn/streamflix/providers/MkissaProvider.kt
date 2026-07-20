@@ -18,6 +18,7 @@ import com.streamflixreborn.streamflix.utils.DnsResolver
 import kotlinx.coroutines.async
 import kotlinx.coroutines.coroutineScope
 import okhttp3.Cache
+import okhttp3.HttpUrl.Companion.toHttpUrlOrNull
 import okhttp3.MediaType.Companion.toMediaType
 import okhttp3.OkHttpClient
 import okhttp3.Request
@@ -34,7 +35,9 @@ import retrofit2.http.Header
 import retrofit2.http.Headers
 import retrofit2.http.POST
 import retrofit2.http.Query
+import retrofit2.http.Url
 import java.io.File
+import java.io.IOException
 import java.security.MessageDigest
 import java.util.concurrent.TimeUnit
 import javax.crypto.Cipher
@@ -44,7 +47,6 @@ import javax.crypto.spec.SecretKeySpec
 object MkissaProvider : Provider {
 
     private const val TAG = "MkissaProvider"
-    private const val API_URL = "https://api.allanime.day/"
     private const val CLOCK_URL = "https://allanime.day"
     private const val SEARCH_HASH = "a24c500a1b765c68ae1d8dd85174931f661c71369c89b92b88b75a725afc471c"
     private const val POPULAR_DAILY_HASH = "a0aca6827cc9a3ad7bc711da4d200a04adea8f1a7545dc418d5e92e74c3aad15"
@@ -53,13 +55,13 @@ object MkissaProvider : Provider {
     private const val SOURCE_HASH = "d405d0edd690624b66baba3068e0edc3ac90f1597d898a1ec8db4e5c43c00fec"
     private const val GENRE_HASH = "ff61a63ff776f334f80c1e6ad1aa49ef71eab831e235e5d6ec679eae5b83450f"
     private const val IMAGE_URL = "https://aln.youtube-anime.com"
-    private const val FALLBACK_CRYPTO_BUILD_ID = "45"
-    private const val FALLBACK_CRYPTO_MASK = "b5aa3f32a24c324a81e3ab5b35d35f9111ca1c39eb26d40a1ad76a37c5d956b9"
     private const val CRYPTO_PREFS = "mkissa_crypto"
     private const val CRYPTO_BUILD_KEY = "build_id"
     private const val CRYPTO_MASK_KEY = "mask"
     private const val CRYPTO_KEY_KEY = "key"
+    private const val CRYPTO_API_URL_KEY = "api_url"
     private const val CRYPTO_BUCKET_MS = 5 * 60 * 1000L
+    private const val CRYPTO_CONFIG_MAX_AGE_MS = 6 * 60 * 60 * 1000L
     private const val HOME_ROW_LIMIT = 20
     private const val HOME_TAG_LIMIT = 20
     private val JSON_MEDIA_TYPE = "application/json; charset=utf-8".toMediaType()
@@ -234,7 +236,7 @@ object MkissaProvider : Provider {
     override val logo = "https://mkissa.to/favicon-32x32.png"
 
     private val service = Retrofit.Builder()
-        .baseUrl(API_URL)
+        .baseUrl("https://mkissa.to/")
         .addConverterFactory(ScalarsConverterFactory.create())
         .client(
             OkHttpClient.Builder()
@@ -260,8 +262,9 @@ object MkissaProvider : Provider {
             "Referer: https://mkissa.to/",
             "User-Agent: Mozilla/5.0"
         )
-        @GET("api")
+        @GET
         suspend fun api(
+            @Url apiUrl: String,
             @Query("variables") variables: String,
             @Query("extensions") extensions: String,
             @Header("x-build-id") buildId: String
@@ -274,8 +277,9 @@ object MkissaProvider : Provider {
             "Referer: https://mkissa.to/",
             "User-Agent: Mozilla/5.0"
         )
-        @POST("api")
+        @POST
         suspend fun apiPost(
+            @Url apiUrl: String,
             @Body body: okhttp3.RequestBody,
             @Header("x-build-id") buildId: String
         ): String
@@ -635,57 +639,64 @@ object MkissaProvider : Provider {
 
     private suspend fun api(variables: JSONObject, hash: String, fallbackQuery: String? = null): JSONObject {
         val protectedQuery = hash == SOURCE_HASH
-        repeat(if (protectedQuery) 2 else 1) { attempt ->
-            val crypto = if (protectedQuery) {
-                getCryptoBootstrap(forceRefresh = attempt > 0)
-            } else {
-                null
-            }
-            val extensions = JSONObject()
-                .put("persistedQuery", JSONObject().put("version", 1).put("sha256Hash", hash))
-            if (protectedQuery) {
-                extensions.put("aaReq", createCryptoRequest(hash, forceRefresh = attempt > 0))
-            }
+        var lastError: Exception? = null
+        repeat(2) { attempt ->
+            try {
+                val bootstrap = getCryptoBootstrap(forceRefresh = attempt > 0)
+                val extensions = JSONObject()
+                    .put("persistedQuery", JSONObject().put("version", 1).put("sha256Hash", hash))
+                if (protectedQuery) {
+                    extensions.put("aaReq", createCryptoRequest(hash, bootstrap))
+                }
 
-            val response = try {
-                JSONObject(
-                    service.api(
-                        variables.toString(),
-                        extensions.toString(),
-                        crypto?.buildId ?: currentCryptoBuildId()
+                val response = try {
+                    JSONObject(
+                        service.api(
+                            bootstrap.apiUrl,
+                            variables.toString(),
+                            extensions.toString(),
+                            bootstrap.buildId
+                        )
                     )
-                )
-            } catch (error: HttpException) {
-                if (fallbackQuery == null) throw error
-                null
-            }
-            if (protectedQuery && response?.hasCryptoError() == true) {
-                if (attempt == 0) {
-                    invalidateCryptoBootstrap()
-                    return@repeat
+                } catch (error: HttpException) {
+                    if (fallbackQuery == null) throw error
+                    null
                 }
-                throw Exception("MKissa rejected the episode crypto token")
-            }
-            if (response != null && !response.shouldRetryWithQueryBody()) return response
-            if (fallbackQuery == null) return response ?: JSONObject()
+                if (response != null && !response.shouldRetryWithQueryBody()) {
+                    if (response.hasCryptoError()) throw CryptoConfigRejectedException()
+                    if (response.hasNoGraphQlData()) {
+                        if (attempt == 0) throw CryptoConfigRejectedException()
+                        throw response.toGraphQlException()
+                    }
+                    return response
+                }
+                if (fallbackQuery == null) return response ?: JSONObject()
 
-            val body = JSONObject()
-                .put("query", fallbackQuery)
-                .put("variables", variables)
-                .put("extensions", extensions)
-                .toString()
-                .toRequestBody(JSON_MEDIA_TYPE)
-            val postResponse = JSONObject(service.apiPost(body, crypto?.buildId ?: currentCryptoBuildId()))
-            if (protectedQuery && postResponse.hasCryptoError()) {
-                if (attempt == 0) {
+                val body = JSONObject()
+                    .put("query", fallbackQuery)
+                    .put("variables", variables)
+                    .put("extensions", extensions)
+                    .toString()
+                    .toRequestBody(JSON_MEDIA_TYPE)
+                val postResponse = JSONObject(
+                    service.apiPost(bootstrap.apiUrl, body, bootstrap.buildId)
+                )
+                if (postResponse.hasCryptoError()) throw CryptoConfigRejectedException()
+                if (postResponse.hasNoGraphQlData()) {
+                    if (attempt == 0) throw CryptoConfigRejectedException()
+                    throw postResponse.toGraphQlException()
+                }
+                return postResponse
+            } catch (error: Exception) {
+                lastError = error
+                if (attempt == 0 && error.shouldRefreshCryptoConfig()) {
                     invalidateCryptoBootstrap()
                     return@repeat
                 }
-                throw Exception("MKissa rejected the episode crypto token")
+                throw error
             }
-            return postResponse
         }
-        return JSONObject()
+        throw lastError ?: Exception("MKissa API request failed")
     }
 
     private suspend fun postQuery(query: String, variables: JSONObject): JSONObject {
@@ -694,7 +705,21 @@ object MkissaProvider : Provider {
             .put("variables", variables)
             .toString()
             .toRequestBody(JSON_MEDIA_TYPE)
-        return JSONObject(service.apiPost(body, currentCryptoBuildId()))
+        var lastError: Exception? = null
+        repeat(2) { attempt ->
+            try {
+                val bootstrap = getCryptoBootstrap(forceRefresh = attempt > 0)
+                return JSONObject(service.apiPost(bootstrap.apiUrl, body, bootstrap.buildId))
+            } catch (error: Exception) {
+                lastError = error
+                if (attempt == 0 && error.shouldRefreshCryptoConfig()) {
+                    invalidateCryptoBootstrap()
+                    return@repeat
+                }
+                throw error
+            }
+        }
+        throw lastError ?: Exception("MKissa API request failed")
     }
 
     private fun parseShows(response: JSONObject): List<TvShow> {
@@ -765,16 +790,42 @@ object MkissaProvider : Provider {
             .mapNotNull { it as? JSONObject }
             .any { error ->
                 val message = error.optString("message")
-                message == "AA_CRYPTO_MISSING" ||
-                        message == "AA_CRYPTO_STALE" ||
-                        message == "AA_CRYPTO_EXPIRED" ||
-                        message == "AA_CRYPTO_QUERY_MISMATCH" ||
-                        message == "AA_CRYPTO_BUILD_MISMATCH"
+                val code = error.optJSONObject("extensions")?.optString("code").orEmpty()
+                sequenceOf(message, code).any { value ->
+                    value.contains("AA_CRYPTO_", ignoreCase = true) ||
+                            value.contains("BUILD_MISMATCH", ignoreCase = true) ||
+                            value.contains("INVALID_BUILD", ignoreCase = true) ||
+                            value.contains("STALE_BUILD", ignoreCase = true) ||
+                            value.contains("x-build-id", ignoreCase = true)
+                }
             }
     }
 
-    private fun createCryptoRequest(queryHash: String, forceRefresh: Boolean): String {
-        val bootstrap = getCryptoBootstrap(forceRefresh)
+    private fun JSONObject.hasNoGraphQlData(): Boolean {
+        return !has("data") || isNull("data")
+    }
+
+    private fun JSONObject.toGraphQlException(): Exception {
+        val messages = optJSONArray("errors")
+            ?.asSequence()
+            ?.mapNotNull { it as? JSONObject }
+            ?.mapNotNull { it.stringOrNull("message") }
+            ?.distinct()
+            ?.joinToString("; ")
+            .orEmpty()
+        return Exception(
+            if (messages.isBlank()) "MKissa API returned no data" else "MKissa API error: $messages"
+        )
+    }
+
+    private fun Exception.shouldRefreshCryptoConfig(): Boolean {
+        return this is IOException ||
+                this is HttpException ||
+                this is org.json.JSONException ||
+                this is CryptoConfigRejectedException
+    }
+
+    private fun createCryptoRequest(queryHash: String, bootstrap: CryptoBootstrap): String {
         val timestamp = System.currentTimeMillis() / CRYPTO_BUCKET_MS * CRYPTO_BUCKET_MS
         val iv = MessageDigest.getInstance("SHA-256")
             .digest("${bootstrap.epoch}:${bootstrap.buildId}:$queryHash:$timestamp".toByteArray(Charsets.UTF_8))
@@ -790,15 +841,13 @@ object MkissaProvider : Provider {
         return Base64.encodeToString(byteArrayOf(1) + iv + encrypted, Base64.NO_WRAP)
     }
 
-    private fun currentCryptoBuildId(): String {
-        return loadStoredCryptoConfig()?.buildId ?: FALLBACK_CRYPTO_BUILD_ID
-    }
-
+    @Synchronized
     private fun getCryptoBootstrap(forceRefresh: Boolean): CryptoBootstrap {
+        val now = System.currentTimeMillis()
         val cached = cryptoBootstrap
-            ?.takeUnless { forceRefresh || System.currentTimeMillis() >= it.switchAt }
+            ?.takeIf { !forceRefresh && it.isFresh(now) }
             ?: loadStoredCryptoConfig()
-                ?.takeUnless { forceRefresh || System.currentTimeMillis() >= it.switchAt }
+                ?.takeIf { !forceRefresh && it.isFresh(now) }
         if (cached != null) {
             cryptoBootstrap = cached
             return cached
@@ -829,13 +878,16 @@ object MkissaProvider : Provider {
                 ?: return null
             val mask = prefs.getString(CRYPTO_MASK_KEY, null)?.hexBytes() ?: return null
             val key = prefs.getString(CRYPTO_KEY_KEY, null)?.hexBytes() ?: return null
+            val apiUrl = prefs.getString(CRYPTO_API_URL_KEY, null)?.normalizedApiUrl() ?: return null
             if (mask.isEmpty() || key.size != 32) return null
             CryptoBootstrap(
                 epoch = prefs.getLong("epoch", -1L),
                 switchAt = prefs.getLong("switch_at", 0L),
+                fetchedAt = prefs.getLong("fetched_at", 0L),
                 buildId = buildId,
                 mask = mask,
-                key = key
+                key = key,
+                apiUrl = apiUrl
             )
         }.getOrNull()
     }
@@ -848,8 +900,10 @@ object MkissaProvider : Provider {
                 .putString(CRYPTO_BUILD_KEY, config.buildId)
                 .putString(CRYPTO_MASK_KEY, config.mask.toHex())
                 .putString(CRYPTO_KEY_KEY, config.key.toHex())
+                .putString(CRYPTO_API_URL_KEY, config.apiUrl)
                 .putLong("epoch", config.epoch)
                 .putLong("switch_at", config.switchAt)
+                .putLong("fetched_at", config.fetchedAt)
                 .apply()
         }
     }
@@ -880,15 +934,23 @@ object MkissaProvider : Provider {
             throw Exception("MKissa crypto bootstrap is invalid")
         }
         val bundleCrypto = fetchBundleCryptoConfig(html)
-        val mask = bundleCrypto?.mask ?: FALLBACK_CRYPTO_MASK.hexBytes()
-            ?: throw Exception("MKissa crypto mask is invalid")
-        val buildId = bundleCrypto?.buildId ?: FALLBACK_CRYPTO_BUILD_ID
+            ?: throw Exception("MKissa crypto bundle config was not found")
+        val mask = bundleCrypto.mask
+        val buildId = bundleCrypto.buildId
         val encodedKey = Base64.decode(partB, Base64.DEFAULT)
         if (encodedKey.size < 32 || mask.isEmpty()) throw Exception("MKissa crypto key is invalid")
         val key = ByteArray(32) { index ->
             (encodedKey[index].toInt() xor mask[index % mask.size].toInt()).toByte()
         }
-        return CryptoBootstrap(epoch = epoch, switchAt = switchAt, buildId = buildId, mask = mask, key = key)
+        return CryptoBootstrap(
+            epoch = epoch,
+            switchAt = switchAt,
+            fetchedAt = System.currentTimeMillis(),
+            buildId = buildId,
+            mask = mask,
+            key = key,
+            apiUrl = bundleCrypto.apiUrl
+        )
     }
 
     private fun fetchBundleCryptoConfig(html: String): BundleCryptoConfig? {
@@ -927,19 +989,44 @@ object MkissaProvider : Provider {
                 }
             }.getOrNull()
         }
-        val script = scripts.firstOrNull { it.contains("const bd=") && it.contains("aaReq") } ?: return null
-        val mask = Regex("""const bd=\"([0-9a-fA-F]{64})\"""")
+        return scripts
+            .filter { it.contains("aaReq") }
+            .mapNotNull(::parseBundleCryptoConfig)
+            .firstOrNull()
+    }
+
+    private fun parseBundleCryptoConfig(script: String): BundleCryptoConfig? {
+        // Older bundles used stable names (`const bd=...`, `fr=...`). Newer minified
+        // bundles rename both variables but retain the two adjacent guarded literals.
+        val apiUrl = Regex("""https://[A-Za-z0-9.-]+(?::\d+)?/api/?""")
+            .find(script)
+            ?.value
+            ?.normalizedApiUrl()
+            ?: return null
+        val legacyMask = Regex("""const\s+bd\s*=\s*[\"']([0-9a-fA-F]{64})[\"']""")
             .find(script)
             ?.groupValues
             ?.getOrNull(1)
-            ?.hexBytes()
-            ?: return null
-        val buildId = Regex("""fr=.*?\"(\d+)\"""")
+        val legacyBuildId = Regex("""\bfr\s*=.{0,160}?[\"'](\d+)[\"']""")
             .find(script)
             ?.groupValues
             ?.getOrNull(1)
-            ?: return null
-        return BundleCryptoConfig(buildId = buildId, mask = mask)
+        if (legacyMask != null && legacyBuildId != null) {
+            return BundleCryptoConfig(
+                buildId = legacyBuildId,
+                mask = legacyMask.hexBytes() ?: return null,
+                apiUrl = apiUrl
+            )
+        }
+
+        val guardedLiterals = Regex(
+            """[\"']([0-9a-fA-F]{64})[\"']\s*:\s*[\"']{2}\s*,\s*[A-Za-z_$][\w$]*\s*=.{0,160}?[\"'](\d+)[\"']\s*:\s*[\"']{2}"""
+        ).find(script) ?: return null
+        return BundleCryptoConfig(
+            buildId = guardedLiterals.groupValues[2],
+            mask = guardedLiterals.groupValues[1].hexBytes() ?: return null,
+            apiUrl = apiUrl
+        )
     }
 
     private fun parsePopular(response: JSONObject): List<TvShow> {
@@ -1316,6 +1403,16 @@ object MkissaProvider : Provider {
         }.getOrNull()
     }
 
+    private fun String.normalizedApiUrl(): String? {
+        val url = toHttpUrlOrNull() ?: return null
+        if (!url.isHttps || url.encodedPath.trimEnd('/') != "/api") return null
+        return url.newBuilder()
+            .query(null)
+            .fragment(null)
+            .build()
+            .toString()
+    }
+
     private fun ByteArray.toHex(): String {
         return joinToString("") { "%02x".format(it.toInt() and 0xff) }
     }
@@ -1372,15 +1469,25 @@ object MkissaProvider : Provider {
     private data class CryptoBootstrap(
         val epoch: Long,
         val switchAt: Long,
+        val fetchedAt: Long,
         val buildId: String,
         val mask: ByteArray,
-        val key: ByteArray
-    )
+        val key: ByteArray,
+        val apiUrl: String
+    ) {
+        fun isFresh(now: Long): Boolean {
+            val age = now - fetchedAt
+            return now < switchAt && age in 0 until CRYPTO_CONFIG_MAX_AGE_MS
+        }
+    }
 
     private data class BundleCryptoConfig(
         val buildId: String,
-        val mask: ByteArray
+        val mask: ByteArray,
+        val apiUrl: String
     )
+
+    private class CryptoConfigRejectedException : Exception("MKissa rejected the crypto configuration")
 
     private val fallbackHomeTags = listOf(
         "Isekai",
