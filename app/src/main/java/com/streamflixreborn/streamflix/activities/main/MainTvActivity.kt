@@ -273,4 +273,26 @@ class MainTvActivity : FragmentActivity() {
             )
         }
     }
+
+    /**
+     * Recreate Home after a profile switch. Profile switching replaces the
+     * Room database, so an existing HomeViewModel may still be collecting
+     * flows from the closed database instance.
+     */
+    fun recreateProviderHome() {
+        val navHost =
+            supportFragmentManager.findFragmentById(R.id.nav_main_fragment) as? NavHostFragment
+        val navController = navHost?.navController ?: return
+
+        navController.navigate(
+            R.id.home,
+            null,
+            navOptions {
+                launchSingleTop = true
+                popUpTo(R.id.home) {
+                    inclusive = true
+                }
+            },
+        )
+    }
 }

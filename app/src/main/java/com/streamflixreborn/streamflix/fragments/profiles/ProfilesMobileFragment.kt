@@ -111,8 +111,16 @@ class ProfilesMobileFragment : Fragment() {
             UserPreferences.currentProvider != null -> R.id.home
             else -> R.id.providers
         }
-        if (!findNavController().popBackStack(destination, false)) {
-            findNavController().navigate(destination)
+
+        val navController = findNavController()
+        if (destination == R.id.home) {
+            // Switching profiles closes the current profile's Room database.
+            // Remove Home inclusively so its fragment and ViewModel are rebuilt
+            // with flows from the newly selected profile's database.
+            navController.popBackStack(R.id.home, true)
+            navController.navigate(R.id.home)
+        } else if (!navController.popBackStack(destination, false)) {
+            navController.navigate(destination)
         }
     }
 

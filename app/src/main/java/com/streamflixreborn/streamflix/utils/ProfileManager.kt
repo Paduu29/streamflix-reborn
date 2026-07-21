@@ -178,6 +178,10 @@ object ProfileManager {
             if (preserveProvider && currentProviderName != UserPreferences.getCurrentProviderName()) {
                 UserPreferences.setCurrentProviderName(currentProviderName)
             }
+            // A profile switch changes the database and cached user data even
+            // when the selected provider remains the same. Refresh all active
+            // provider screens, especially Home, in that case as well.
+            ProviderChangeNotifier.notifyProviderChanged()
             Log.i(TAG, "Switched to profile: ${profile.name} (${profile.id})")
         }
     }

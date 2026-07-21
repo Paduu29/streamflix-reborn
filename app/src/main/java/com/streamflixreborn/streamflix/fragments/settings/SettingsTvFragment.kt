@@ -2193,6 +2193,9 @@ class SettingsTvFragment : LeanbackPreferenceFragmentCompat() {
                                 finish()
                                 startActivity(Intent(this, this::class.java))
                             }
+                        } else {
+                            (requireActivity() as? MainTvActivity)
+                                ?.recreateProviderHome()
                         }
                     }
                     getString(R.string.profile_action_rename) -> showRenameProfileDialogTv(profile)

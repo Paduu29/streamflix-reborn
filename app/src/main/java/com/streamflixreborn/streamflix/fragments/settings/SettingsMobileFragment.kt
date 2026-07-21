@@ -1355,6 +1355,9 @@ class SettingsMobileFragment : PreferenceFragmentCompat() {
                                 finish()
                                 startActivity(Intent(this, this::class.java))
                             }
+                        } else {
+                            (requireActivity() as? MainMobileActivity)
+                                ?.recreateProviderHome()
                         }
                     }
                     getString(R.string.profile_action_rename) -> showRenameProfileDialog(profile)
