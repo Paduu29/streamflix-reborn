@@ -170,7 +170,8 @@ class HomeMobileFragment : Fragment() {
             )
             val color = colors[profile.position.coerceAtLeast(0) % colors.size]
             val drawable = android.graphics.drawable.GradientDrawable().apply {
-                shape = android.graphics.drawable.GradientDrawable.OVAL
+                shape = android.graphics.drawable.GradientDrawable.RECTANGLE
+                cornerRadius = 8f * binding.ivProfileAvatar.resources.displayMetrics.density
                 setColor(color)
             }
             binding.ivProfileAvatar.setImageDrawable(drawable)

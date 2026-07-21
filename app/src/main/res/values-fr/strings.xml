@@ -26,6 +26,7 @@
     <string name="providers_choose_title">Choisir un fournisseur</string>
 
     <string name="main_menu_change_provider">Changer de fournisseur</string>
+    <string name="main_menu_change_profile">Changer de profil</string>
     <string name="main_menu_search">Rechercher</string>
     <string name="main_menu_home">Accueil</string>
     <string name="main_menu_movies">Films</string>
@@ -506,6 +507,8 @@
     <string name="settings_refresh_cache_success">Cache actualisé avec succès</string>
     <string name="profile_who_is_watching">Qui regarde ?</string>
     <string name="profile_no_profiles">Aucun profil pour l\'instant</string>
+    <string name="profile_default_name">Par défaut</string>
+    <string name="profile_current">Profil actuel</string>
     <string name="profile_add_btn">Ajouter un profil</string>
     <string name="profile_manage_btn">Gérer</string>
     <string name="profile_edit_btn">Modifier le profil</string>

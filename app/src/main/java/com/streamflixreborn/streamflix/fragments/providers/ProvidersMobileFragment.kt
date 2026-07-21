@@ -189,7 +189,8 @@ class ProvidersMobileFragment : Fragment() {
                 )
                 val color = colors[profile.position.coerceAtLeast(0) % colors.size]
                 val drawable = GradientDrawable().apply {
-                    shape = GradientDrawable.OVAL
+                    shape = GradientDrawable.RECTANGLE
+                    cornerRadius = 8f * binding.ivProfileAvatar.resources.displayMetrics.density
                     setColor(color)
                 }
                 binding.ivProfileAvatar.setImageDrawable(drawable)

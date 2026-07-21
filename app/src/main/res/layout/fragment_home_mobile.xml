@@ -60,7 +60,7 @@
         android:layout_width="wrap_content"
         android:layout_height="wrap_content"
         android:layout_marginStart="16dp"
-        android:layout_marginTop="8dp"
+        android:layout_marginTop="12dp"
         android:gravity="center_vertical"
         android:orientation="horizontal"
         app:layout_constraintStart_toStartOf="parent"
@@ -68,8 +68,8 @@
 
         <FrameLayout
             android:id="@+id/fl_profile_avatar"
-            android:layout_width="24dp"
-            android:layout_height="24dp">
+            android:layout_width="28dp"
+            android:layout_height="28dp">
 
             <ImageView
                 android:id="@+id/iv_profile_avatar"
@@ -88,14 +88,21 @@
                 tools:text="D" />
         </FrameLayout>
 
-        <TextView
-            android:id="@+id/tv_profile_name"
+        <LinearLayout
             android:layout_width="wrap_content"
             android:layout_height="wrap_content"
-            android:layout_marginStart="6dp"
-            android:textColor="#FFFFFF"
-            android:textSize="12sp"
-            tools:text="Default" />
+            android:layout_marginStart="8dp"
+            android:orientation="vertical">
+
+            <TextView
+                android:id="@+id/tv_profile_name"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:textColor="#FFFFFF"
+                android:textSize="13sp"
+                tools:text="Default" />
+
+        </LinearLayout>
     </LinearLayout>
 
 </androidx.constraintlayout.widget.ConstraintLayout>

@@ -44,12 +44,45 @@ data class ExportMetadata(
 
 class BackupRestoreManager(
     private val context: Context,
-    private val providers: List<ProviderBackupContext>
+    initialProviders: List<ProviderBackupContext>
 ) {
     private val TAG = "BackupVerify"
+    private val providerDefinitions = initialProviders.map { it.provider }.distinctBy { it.name }
+    private var providers: List<ProviderBackupContext> = initialProviders
+    private var boundProfileId: String? = ProfileManager.activeProfileId
+
+    /**
+     * DAO instances are tied to the database opened for a specific profile.
+     * Settings can remain alive while the user switches profiles, so refresh
+     * these bindings before every backup operation instead of reusing DAOs
+     * from the profile that was active when Settings was opened.
+     */
+    private fun ensureActiveProfileBindings(force: Boolean = false) {
+        val activeProfileId = ProfileManager.activeProfileId
+        if (!force && activeProfileId == boundProfileId) return
+
+        providers = providerDefinitions.mapNotNull { provider ->
+            runCatching {
+                val db = AppDatabase.getInstanceForProvider(provider.name, context, activeProfileId)
+                ProviderBackupContext(
+                    name = provider.name,
+                    movieDao = db.movieDao(),
+                    tvShowDao = db.tvShowDao(),
+                    episodeDao = db.episodeDao(),
+                    seasonDao = db.seasonDao(),
+                    provider = provider,
+                )
+            }.onFailure { error ->
+                Log.w(TAG, "Skipping ${provider.name} while rebinding profile $activeProfileId", error)
+            }.getOrNull()
+        }
+        boundProfileId = activeProfileId
+        Log.d(TAG, "Backup databases bound to profile $activeProfileId")
+    }
 
     suspend fun refreshCachesFromDatabase(): Boolean {
         return try {
+            ensureActiveProfileBindings()
             providers.forEach { buildCacheForProvider(it) }
             true
         } catch (t: Throwable) {
@@ -60,6 +93,7 @@ class BackupRestoreManager(
 
     fun exportDatabaseZip(): ByteArray? {
         return try {
+            ensureActiveProfileBindings()
             val output = ByteArrayOutputStream()
             ZipOutputStream(output).use { zip ->
                 providers.forEach { providerCtx ->
@@ -86,6 +120,7 @@ class BackupRestoreManager(
 
     fun exportUserData(): String? {
         return try {
+            ensureActiveProfileBindings()
             val root = JSONObject()
             root.put("version", 5)
             root.put("exportedAt", System.currentTimeMillis())
@@ -205,6 +240,8 @@ class BackupRestoreManager(
     @Transaction
     suspend fun importUserData(json: String): Boolean {
         return try {
+            ensureActiveProfileBindings(force = true)
+            Log.d(TAG, "Import target profile: ${ProfileManager.activeProfileId}")
             val obj = JSONObject(json)
             val providersArray = obj.optJSONArray("providers") ?: return false
             val backupVersion = obj.optInt("version", 1)

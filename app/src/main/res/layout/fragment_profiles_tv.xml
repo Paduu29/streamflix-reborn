@@ -4,7 +4,7 @@
     xmlns:tools="http://schemas.android.com/tools"
     android:layout_width="match_parent"
     android:layout_height="match_parent"
-    android:background="#141414"
+    android:background="?attr/app_background_color"
     android:padding="48dp">
 
     <TextView
@@ -78,6 +78,7 @@
             android:background="@drawable/bg_button_profile_tv"
             android:paddingHorizontal="24dp"
             android:text="@string/profile_add_btn"
+            android:textAllCaps="false"
             android:textColor="#808080"
             android:textSize="18sp" />
 
@@ -89,6 +90,7 @@
             android:background="@drawable/bg_button_profile_tv"
             android:paddingHorizontal="24dp"
             android:text="@string/profile_manage_btn"
+            android:textAllCaps="false"
             android:textColor="#808080"
             android:textSize="18sp" />
 

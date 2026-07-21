@@ -11,6 +11,7 @@ import androidx.recyclerview.widget.ListAdapter
 import androidx.recyclerview.widget.RecyclerView
 import com.streamflixreborn.streamflix.R
 import com.streamflixreborn.streamflix.models.Profile
+import com.streamflixreborn.streamflix.utils.ProfileManager
 
 class ProfileAdapter(
     private val onProfileClick: (Profile) -> Unit,
@@ -18,7 +19,7 @@ class ProfileAdapter(
     private val layoutResId: Int = R.layout.item_profile_mobile,
 ) : ListAdapter<Profile, ProfileAdapter.ProfileViewHolder>(DiffCallback) {
 
-    private val profileColors = intArrayOf(
+    private val fallbackColors = intArrayOf(
         0xFF1E88E5.toInt(), 0xFF43A047.toInt(), 0xFFE53935.toInt(),
         0xFFFB8C00.toInt(), 0xFF8E24AA.toInt(), 0xFF00ACC1.toInt(),
         0xFFD81B60.toInt(), 0xFF3949AB.toInt(), 0xFF6D4C41.toInt(),
@@ -38,20 +39,37 @@ class ProfileAdapter(
         private val ivProfileAvatar: ImageView = itemView.findViewById(R.id.iv_profile_avatar)
         private val tvProfileInitial: TextView = itemView.findViewById(R.id.tv_profile_initial)
         private val tvProfileName: TextView = itemView.findViewById(R.id.tv_profile_name)
+        private val tvProfileCurrent: TextView? = itemView.findViewById(R.id.tv_profile_current)
 
         fun bind(profile: Profile) {
-            val colorIndex = bindingAdapterPosition % profileColors.size
-            val color = profileColors[colorIndex]
-
+            itemView.isSelected = profile.id == ProfileManager.activeProfileId
             val drawable = GradientDrawable().apply {
-                shape = GradientDrawable.OVAL
+                shape = GradientDrawable.RECTANGLE
+                cornerRadius = 8f * itemView.resources.displayMetrics.density
+                // Profiles created before avatar colors were assigned all have
+                // the original blue default. Use their stable position so the
+                // existing profile list is not rendered as three identical avatars.
+                val color = if (profile.avatarColor == fallbackColors.first()) {
+                    fallbackColors[profile.position % fallbackColors.size]
+                } else {
+                    profile.avatarColor
+                }
                 setColor(color)
             }
             ivProfileAvatar.setImageDrawable(drawable)
 
-            val initial = profile.name.firstOrNull()?.uppercase() ?: "?"
+            val initial = profile.name.firstOrNull()?.toString()?.uppercase() ?: "?"
             tvProfileInitial.text = initial
             tvProfileName.text = profile.name
+            tvProfileCurrent?.apply {
+                visibility = View.VISIBLE
+                alpha = if (profile.id == ProfileManager.activeProfileId) 1f else 0f
+                contentDescription = text
+            }
+            itemView.contentDescription = itemView.context.getString(
+                R.string.profile_card_content_description,
+                profile.name,
+            )
 
             itemView.setOnClickListener { onProfileClick(profile) }
             itemView.setOnLongClickListener {

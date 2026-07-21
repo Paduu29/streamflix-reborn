@@ -20,6 +20,7 @@
     <string name="providers_choose_title">Wybierz dostawce</string>
 
     <string name="main_menu_change_provider">Zmien dostawce</string>
+    <string name="main_menu_change_profile">Zmień profil</string>
     <string name="main_menu_search">Szukaj</string>
     <string name="main_menu_home">Start</string>
     <string name="main_menu_movies">Filmy</string>
@@ -165,6 +166,8 @@
     <string name="settings_app_language_polish">Polski</string>
     <string name="profile_who_is_watching">Kto ogląda?</string>
     <string name="profile_no_profiles">Brak profili</string>
+    <string name="profile_default_name">Domyślny</string>
+    <string name="profile_current">Bieżący profil</string>
     <string name="profile_add_btn">Dodaj Profil</string>
     <string name="profile_manage_btn">Zarządzaj</string>
     <string name="profile_edit_btn">Edytuj Profil</string>

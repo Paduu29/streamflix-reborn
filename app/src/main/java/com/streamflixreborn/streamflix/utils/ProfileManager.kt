@@ -17,6 +17,12 @@ object ProfileManager {
     private const val GLOBAL_PREFS_NAME = "${BuildConfig.APPLICATION_ID}.profile_global"
     private const val KEY_ACTIVE_PROFILE_ID = "ACTIVE_PROFILE_ID"
     private const val DEFAULT_PROFILE_ID = "default"
+    private val profileColors = intArrayOf(
+        0xFF1E88E5.toInt(), 0xFF43A047.toInt(), 0xFFE53935.toInt(),
+        0xFFFB8C00.toInt(), 0xFF8E24AA.toInt(), 0xFF00ACC1.toInt(),
+        0xFFD81B60.toInt(), 0xFF3949AB.toInt(), 0xFF6D4C41.toInt(),
+        0xFF546E7A.toInt(),
+    )
 
     private lateinit var appContext: Context
     private var profileDao: ProfileDao? = null
@@ -65,7 +71,7 @@ object ProfileManager {
     private fun createDefaultProfile() {
         val defaultProfile = Profile(
             id = DEFAULT_PROFILE_ID,
-            name = "Default",
+            name = appContext.getString(com.streamflixreborn.streamflix.R.string.profile_default_name),
             position = 0,
         )
         kotlinx.coroutines.runBlocking {
@@ -77,6 +83,7 @@ object ProfileManager {
 
         migrateLegacyPrefs()
         migrateLegacyDatabasesToDefaultProfile()
+        UserDataCache.migrateLegacyCacheToDefaultProfile(appContext, Provider.providers.keys)
         Log.i(TAG, "Created default profile: ${defaultProfile.name}")
     }
 
@@ -179,6 +186,7 @@ object ProfileManager {
         val profileId = _activeProfile?.id ?: return
         val profilePrefs = getProfilePrefs(profileId)
         UserPreferences.profilePrefs = profilePrefs
+        UserPreferences.profileId = profileId
     }
 
     fun getProfilePrefs(profileId: String): SharedPreferences {
@@ -198,6 +206,7 @@ object ProfileManager {
         val pos = profileDao?.getNextPosition() ?: return null
         val profile = Profile(
             name = name.trim().take(30),
+            avatarColor = profileColors[pos % profileColors.size],
             position = pos,
         )
         profileDao?.insert(profile)

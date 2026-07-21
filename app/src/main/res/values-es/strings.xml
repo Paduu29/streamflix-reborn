@@ -28,6 +28,7 @@
     <string name="providers_choose_title">Seleccionar proveedor</string>
 
     <string name="main_menu_change_provider">Cambiar proveedor</string>
+    <string name="main_menu_change_profile">Cambiar perfil</string>
     <string name="main_menu_search">Buscar</string>
     <string name="main_menu_home">Inicio</string>
     <string name="main_menu_movies">Películas</string>
@@ -506,6 +507,8 @@
     <string name="settings_force_extra_buffer_summary">Activa búfer extra para todos los servidores de forma predeterminada</string>
     <string name="profile_who_is_watching">¿Quién está viendo?</string>
     <string name="profile_no_profiles">Aún no hay perfiles</string>
+    <string name="profile_default_name">Predeterminado</string>
+    <string name="profile_current">Perfil actual</string>
     <string name="profile_add_btn">Añadir Perfil</string>
     <string name="profile_manage_btn">Gestionar</string>
     <string name="profile_edit_btn">Editar Perfil</string>

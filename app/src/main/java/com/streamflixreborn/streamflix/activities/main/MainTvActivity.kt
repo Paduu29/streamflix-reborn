@@ -193,7 +193,8 @@ class MainTvActivity : FragmentActivity() {
                 )
                 val color = colors[profile.position.coerceAtLeast(0) % colors.size]
                 val drawable = android.graphics.drawable.GradientDrawable().apply {
-                    shape = android.graphics.drawable.GradientDrawable.OVAL
+                    shape = android.graphics.drawable.GradientDrawable.RECTANGLE
+                    cornerRadius = 8f * header.ivHeaderProfileAvatar.resources.displayMetrics.density
                     setColor(color)
                 }
                 header.ivHeaderProfileAvatar.setImageDrawable(drawable)
@@ -218,11 +219,13 @@ class MainTvActivity : FragmentActivity() {
                 header.tvNavigationHeaderTitle.visibility = View.VISIBLE
                 header.tvNavigationHeaderSubtitle.visibility = View.VISIBLE
                 header.tvHeaderProfileName.visibility = View.VISIBLE
+                header.tvHeaderProfileSubtitle.visibility = View.VISIBLE
             }
             setOnCloseListener {
                 header.tvNavigationHeaderTitle.visibility = View.GONE
                 header.tvNavigationHeaderSubtitle.visibility = View.GONE
                 header.tvHeaderProfileName.visibility = View.GONE
+                header.tvHeaderProfileSubtitle.visibility = View.GONE
             }
         }
     }

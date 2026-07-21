@@ -4,6 +4,9 @@
 
     <string name="profile_who_is_watching">Who\'s watching?</string>
     <string name="profile_no_profiles">No profiles yet</string>
+    <string name="profile_default_name">Default</string>
+    <string name="profile_current">Current profile</string>
+    <string name="profile_card_content_description">Profile %1$s</string>
     <string name="profile_add_btn">Add Profile</string>
     <string name="profile_manage_btn">Manage</string>
     <string name="profile_edit_btn">Edit Profile</string>
@@ -55,6 +58,7 @@
     <string name="providers_choose_title">Choose a provider</string>
 
     <string name="main_menu_change_provider">Change provider</string>
+    <string name="main_menu_change_profile">Change profile</string>
     <string name="main_menu_search">Search</string>
     <string name="main_menu_home">Home</string>
     <string name="main_menu_movies">Movies</string>

@@ -96,15 +96,23 @@ abstract class AppDatabase : RoomDatabase() {
             }
         }
 
-        fun getInstanceForProvider(providerName: String, context: Context): AppDatabase {
-            return buildDatabase(providerName, context)
+        fun getInstanceForProvider(
+            providerName: String,
+            context: Context,
+            profileId: String? = ProfileManager.activeProfileId,
+        ): AppDatabase {
+            return buildDatabase(providerName, context, profileId)
         }
 
-        private fun buildDatabase(providerName: String, context: Context): AppDatabase {
+        private fun buildDatabase(
+            providerName: String,
+            context: Context,
+            profileId: String? = ProfileManager.activeProfileId,
+        ): AppDatabase {
             return Room.databaseBuilder(
                 context = context.applicationContext,
                 klass = AppDatabase::class.java,
-                name = databaseNameFor(providerName)
+                name = databaseNameFor(providerName, profileId)
             )
                 .allowMainThreadQueries()
                 .addMigrations(MIGRATION_1_2)
