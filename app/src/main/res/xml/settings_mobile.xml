@@ -313,6 +313,42 @@
         </PreferenceCategory>
 
         <PreferenceCategory
+            android:key="pc_serienstream_settings"
+            android:title="@string/settings_category_serienstream"
+            app:iconSpaceReserved="false">
+
+            <EditTextPreference
+                android:key="provider_serienstream_domain"
+                android:title="@string/settings_category_serienstream_domain"
+                android:inputType="text"
+                app:iconSpaceReserved="false" />
+
+            <Preference
+                android:key="provider_serienstream_domain_reset"
+                android:title="@string/settings_serienstream_domain_reset"
+                android:summary="@string/settings_serienstream_domain_reset_summary"
+                app:iconSpaceReserved="false" />
+        </PreferenceCategory>
+
+        <PreferenceCategory
+            android:key="pc_moflix_settings"
+            android:title="@string/settings_category_moflix"
+            app:iconSpaceReserved="false">
+
+            <EditTextPreference
+                android:key="provider_moflix_domain"
+                android:title="@string/settings_category_moflix_domain"
+                android:inputType="text"
+                app:iconSpaceReserved="false" />
+
+            <Preference
+                android:key="provider_moflix_domain_reset"
+                android:title="@string/settings_moflix_domain_reset"
+                android:summary="@string/settings_moflix_domain_reset_summary"
+                app:iconSpaceReserved="false" />
+        </PreferenceCategory>
+
+        <PreferenceCategory
             android:key="pc_cuevana_settings"
             android:title="@string/settings_category_cuevana"
             app:iconSpaceReserved="false">
@@ -333,6 +369,21 @@
                 android:key="provider_poseidon_domain"
                 android:title="@string/settings_category_poseidon_domain"
                 android:inputType="text"
+                app:iconSpaceReserved="false" />
+        </PreferenceCategory>
+
+        <PreferenceCategory
+            android:key="pc_animeonlineninja_settings"
+            android:title="@string/settings_category_animeonlineninja"
+            app:iconSpaceReserved="false">
+
+            <ListPreference
+                android:key="provider_animeonlineninja_preferred_server"
+                android:title="@string/settings_provider_animeonlineninja_preferred_server"
+                android:summary="@string/settings_provider_animeonlineninja_preferred_server_summary"
+                android:defaultValue=""
+                android:entries="@array/animeonlineninja_preferred_server_entries"
+                android:entryValues="@array/animeonlineninja_preferred_server_values"
                 app:iconSpaceReserved="false" />
         </PreferenceCategory>
 
