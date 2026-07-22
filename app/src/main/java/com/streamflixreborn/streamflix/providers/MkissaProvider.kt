@@ -47,6 +47,7 @@ import javax.crypto.spec.SecretKeySpec
 object MkissaProvider : Provider {
 
     private const val TAG = "MkissaProvider"
+    private const val API_URL = "https://api.allanime.day/api"
     private const val CLOCK_URL = "https://allanime.day"
     private const val SEARCH_HASH = "a24c500a1b765c68ae1d8dd85174931f661c71369c89b92b88b75a725afc471c"
     private const val POPULAR_DAILY_HASH = "a0aca6827cc9a3ad7bc711da4d200a04adea8f1a7545dc418d5e92e74c3aad15"
@@ -55,6 +56,7 @@ object MkissaProvider : Provider {
     private const val SOURCE_HASH = "d405d0edd690624b66baba3068e0edc3ac90f1597d898a1ec8db4e5c43c00fec"
     private const val GENRE_HASH = "ff61a63ff776f334f80c1e6ad1aa49ef71eab831e235e5d6ec679eae5b83450f"
     private const val IMAGE_URL = "https://aln.youtube-anime.com"
+    private const val DEFAULT_BUILD_ID = "45"
     private const val CRYPTO_PREFS = "mkissa_crypto"
     private const val CRYPTO_BUILD_KEY = "build_id"
     private const val CRYPTO_MASK_KEY = "mask"
@@ -640,22 +642,26 @@ object MkissaProvider : Provider {
     private suspend fun api(variables: JSONObject, hash: String, fallbackQuery: String? = null): JSONObject {
         val protectedQuery = hash == SOURCE_HASH
         var lastError: Exception? = null
-        repeat(2) { attempt ->
+        repeat(if (protectedQuery) 2 else 1) { attempt ->
             try {
-                val bootstrap = getCryptoBootstrap(forceRefresh = attempt > 0)
+                val bootstrap = if (protectedQuery) {
+                    getCryptoBootstrap(forceRefresh = attempt > 0)
+                } else {
+                    null
+                }
                 val extensions = JSONObject()
                     .put("persistedQuery", JSONObject().put("version", 1).put("sha256Hash", hash))
                 if (protectedQuery) {
-                    extensions.put("aaReq", createCryptoRequest(hash, bootstrap))
+                    extensions.put("aaReq", createCryptoRequest(hash, bootstrap!!))
                 }
 
                 val response = try {
                     JSONObject(
                         service.api(
-                            bootstrap.apiUrl,
+                            bootstrap?.apiUrl ?: API_URL,
                             variables.toString(),
                             extensions.toString(),
-                            bootstrap.buildId
+                            bootstrap?.buildId ?: DEFAULT_BUILD_ID
                         )
                     )
                 } catch (error: HttpException) {
@@ -663,9 +669,8 @@ object MkissaProvider : Provider {
                     null
                 }
                 if (response != null && !response.shouldRetryWithQueryBody()) {
-                    if (response.hasCryptoError()) throw CryptoConfigRejectedException()
+                    if (protectedQuery && response.hasCryptoError()) throw CryptoConfigRejectedException()
                     if (response.hasNoGraphQlData()) {
-                        if (attempt == 0) throw CryptoConfigRejectedException()
                         throw response.toGraphQlException()
                     }
                     return response
@@ -679,17 +684,20 @@ object MkissaProvider : Provider {
                     .toString()
                     .toRequestBody(JSON_MEDIA_TYPE)
                 val postResponse = JSONObject(
-                    service.apiPost(bootstrap.apiUrl, body, bootstrap.buildId)
+                    service.apiPost(
+                        bootstrap?.apiUrl ?: API_URL,
+                        body,
+                        bootstrap?.buildId ?: DEFAULT_BUILD_ID
+                    )
                 )
-                if (postResponse.hasCryptoError()) throw CryptoConfigRejectedException()
+                if (protectedQuery && postResponse.hasCryptoError()) throw CryptoConfigRejectedException()
                 if (postResponse.hasNoGraphQlData()) {
-                    if (attempt == 0) throw CryptoConfigRejectedException()
                     throw postResponse.toGraphQlException()
                 }
                 return postResponse
             } catch (error: Exception) {
                 lastError = error
-                if (attempt == 0 && error.shouldRefreshCryptoConfig()) {
+                if (protectedQuery && attempt == 0 && error.shouldRefreshCryptoConfig()) {
                     invalidateCryptoBootstrap()
                     return@repeat
                 }
@@ -705,21 +713,7 @@ object MkissaProvider : Provider {
             .put("variables", variables)
             .toString()
             .toRequestBody(JSON_MEDIA_TYPE)
-        var lastError: Exception? = null
-        repeat(2) { attempt ->
-            try {
-                val bootstrap = getCryptoBootstrap(forceRefresh = attempt > 0)
-                return JSONObject(service.apiPost(bootstrap.apiUrl, body, bootstrap.buildId))
-            } catch (error: Exception) {
-                lastError = error
-                if (attempt == 0 && error.shouldRefreshCryptoConfig()) {
-                    invalidateCryptoBootstrap()
-                    return@repeat
-                }
-                throw error
-            }
-        }
-        throw lastError ?: Exception("MKissa API request failed")
+        return JSONObject(service.apiPost(API_URL, body, DEFAULT_BUILD_ID))
     }
 
     private fun parseShows(response: JSONObject): List<TvShow> {
@@ -1019,6 +1013,19 @@ object MkissaProvider : Provider {
             )
         }
 
+        // Current bundles guard the mask but assign the adjacent build ID
+        // directly: `const x=...?'<mask>':'',y='<build>';`.
+        val guardedMaskWithDirectBuild = Regex(
+            """[\"']([0-9a-fA-F]{64})[\"']\s*:\s*[\"']{2}\s*,\s*[A-Za-z_$][\w$]*\s*=\s*[\"'](\d+)[\"']\s*[,;]"""
+        ).find(script)
+        if (guardedMaskWithDirectBuild != null) {
+            return BundleCryptoConfig(
+                buildId = guardedMaskWithDirectBuild.groupValues[2],
+                mask = guardedMaskWithDirectBuild.groupValues[1].hexBytes() ?: return null,
+                apiUrl = apiUrl
+            )
+        }
+
         val guardedLiterals = Regex(
             """[\"']([0-9a-fA-F]{64})[\"']\s*:\s*[\"']{2}\s*,\s*[A-Za-z_$][\w$]*\s*=.{0,160}?[\"'](\d+)[\"']\s*:\s*[\"']{2}"""
         ).find(script) ?: return null
@@ -1047,7 +1054,15 @@ object MkissaProvider : Provider {
         val id = if (isMovie) "movie:$rawId" else rawId
         val title = displayTitleOrNull() ?: return null
         val overview = stringOrNull("description")?.let { Jsoup.parse(it).text() }
-        val availableEpisodes = availableEpisodeTranslation(isMovie = isMovie)
+        // Browse results are compared by RecyclerView's DiffUtil. Keeping episode
+        // graphs on those cards lets TvShow.episodeToWatch attach TvShow/Season
+        // back-references, which makes model equality recurse indefinitely.
+        // Episode metadata is only needed by the detail response.
+        val availableEpisodes = if (detailed) {
+            availableEpisodeTranslation(isMovie = isMovie)
+        } else {
+            null
+        }
         val runtime = stringOrNull("episodeDuration")?.toLongOrNull()?.let { (it / 60000L).toInt() }
 
         return TvShow(
