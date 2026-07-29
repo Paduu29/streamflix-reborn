@@ -46,6 +46,7 @@ import com.streamflixreborn.streamflix.providers.TmdbProvider
 import com.streamflixreborn.streamflix.utils.AppLanguageManager
 import com.streamflixreborn.streamflix.utils.DnsResolver
 import kotlin.coroutines.suspendCoroutine
+import com.streamflixreborn.streamflix.utils.ProfileColorPicker
 import com.streamflixreborn.streamflix.utils.ProfileManager
 import com.streamflixreborn.streamflix.utils.ProviderChangeNotifier
 import com.streamflixreborn.streamflix.utils.ThemeManager
@@ -1336,6 +1337,7 @@ class SettingsMobileFragment : PreferenceFragmentCompat() {
         val items = mutableListOf<String>().apply {
             add(getString(R.string.profile_action_switch))
             add(getString(R.string.profile_action_rename))
+            add(getString(R.string.profile_action_color))
             if (profileCount > 1) {
                 add(getString(R.string.profile_action_delete))
             }
@@ -1348,19 +1350,22 @@ class SettingsMobileFragment : PreferenceFragmentCompat() {
                     getString(R.string.profile_action_switch) -> {
                         val oldProfileId = ProfileManager.activeProfileId
                         val oldLang = oldProfileId?.let { AppLanguageManager.getProfileLanguage(requireContext(), it) }
-                        ProfileManager.switchToProfile(profile.id)
-                        val newLang = AppLanguageManager.getProfileLanguage(requireContext(), profile.id)
-                        if (newLang != (oldLang ?: AppLanguageManager.SYSTEM_LANGUAGE)) {
-                            requireActivity().apply {
-                                finish()
-                                startActivity(Intent(this, this::class.java))
+                        lifecycleScope.launch {
+                            ProfileManager.switchToProfile(profile.id)
+                            val newLang = AppLanguageManager.getProfileLanguage(requireContext(), profile.id)
+                            if (newLang != (oldLang ?: AppLanguageManager.SYSTEM_LANGUAGE)) {
+                                requireActivity().apply {
+                                    finish()
+                                    startActivity(Intent(this, this::class.java))
+                                }
+                            } else {
+                                (requireActivity() as? MainMobileActivity)
+                                    ?.recreateProviderHome()
                             }
-                        } else {
-                            (requireActivity() as? MainMobileActivity)
-                                ?.recreateProviderHome()
                         }
                     }
                     getString(R.string.profile_action_rename) -> showRenameProfileDialog(profile)
+                    getString(R.string.profile_action_color) -> showProfileColorDialog(profile)
                     getString(R.string.profile_action_delete) -> showDeleteProfileDialog(profile)
                 }
             }
@@ -1410,6 +1415,17 @@ class SettingsMobileFragment : PreferenceFragmentCompat() {
             }
             .setNegativeButton(android.R.string.cancel, null)
             .show()
+    }
+
+    private fun showProfileColorDialog(profile: com.streamflixreborn.streamflix.models.Profile) {
+        ProfileColorPicker.show(requireContext(), profile.avatarColor) { color ->
+            lifecycleScope.launch {
+                if (ProfileManager.setProfileColor(profile.id, color)) {
+                    Toast.makeText(requireContext(), R.string.profile_color_changed, Toast.LENGTH_SHORT).show()
+                    if (profile.id == ProfileManager.activeProfileId) requireActivity().recreate()
+                }
+            }
+        }
     }
 
     private fun showDeleteProfileDialog(profile: com.streamflixreborn.streamflix.models.Profile) {

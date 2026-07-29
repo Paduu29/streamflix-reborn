@@ -19,10 +19,12 @@ import com.streamflixreborn.streamflix.adapters.ProfileAdapter
 import com.streamflixreborn.streamflix.databinding.FragmentProfilesMobileBinding
 import com.streamflixreborn.streamflix.models.Profile
 import com.streamflixreborn.streamflix.utils.AppLanguageManager
+import com.streamflixreborn.streamflix.utils.ProfileColorPicker
 import com.streamflixreborn.streamflix.utils.ProfileManager
 import com.streamflixreborn.streamflix.utils.UserPreferences
 import com.streamflixreborn.streamflix.utils.dp
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.CancellationException
 
 class ProfilesMobileFragment : Fragment() {
 
@@ -32,6 +34,7 @@ class ProfilesMobileFragment : Fragment() {
     private val viewModel by viewModels<ProfilesViewModel>()
 
     private lateinit var profileAdapter: ProfileAdapter
+    private var isSwitchingProfile = false
 
     override fun onCreateView(
         inflater: LayoutInflater,
@@ -88,20 +91,35 @@ class ProfilesMobileFragment : Fragment() {
     }
 
     private fun selectProfile(profile: Profile) {
+        if (isSwitchingProfile) return
         val oldProfileId = ProfileManager.activeProfileId
         val oldLang = oldProfileId?.let { AppLanguageManager.getProfileLanguage(requireContext(), it) }
         val cameFromProviders = findNavController().previousBackStackEntry?.destination?.id == R.id.providers
-        ProfileManager.switchToProfile(profile.id, preserveProvider = !cameFromProviders)
-        val newLang = AppLanguageManager.getProfileLanguage(requireContext(), profile.id)
-        if (newLang != (oldLang ?: AppLanguageManager.SYSTEM_LANGUAGE)) {
-            requireActivity().apply {
-                finish()
-                startActivity(Intent(this, this::class.java).apply {
-                    if (cameFromProviders) putExtra("NAV_TO_PROVIDERS", true)
-                })
-            }
-        } else {
+        if (profile.id == ProfileManager.activeProfileId) {
             navigateToNext(cameFromProviders)
+            return
+        }
+        isSwitchingProfile = true
+        viewLifecycleOwner.lifecycleScope.launch {
+            try {
+                ProfileManager.switchToProfile(profile.id, preserveProvider = !cameFromProviders)
+                if (!isAdded) return@launch
+                val newLang = AppLanguageManager.getProfileLanguage(requireContext(), profile.id)
+                if (newLang != (oldLang ?: AppLanguageManager.SYSTEM_LANGUAGE)) {
+                    requireActivity().apply {
+                        finish()
+                        startActivity(Intent(this, this::class.java).apply {
+                            if (cameFromProviders) putExtra("NAV_TO_PROVIDERS", true)
+                        })
+                    }
+                } else {
+                    navigateToNext(cameFromProviders)
+                }
+            } catch (e: CancellationException) {
+                throw e
+            } finally {
+                isSwitchingProfile = false
+            }
         }
     }
 
@@ -128,6 +146,7 @@ class ProfilesMobileFragment : Fragment() {
         val items = mutableListOf<String>().apply {
             add(getString(R.string.profile_action_switch))
             add(getString(R.string.profile_action_rename))
+            add(getString(R.string.profile_action_color))
             if (profileCount > 1) {
                 add(getString(R.string.profile_action_delete))
             }
@@ -139,6 +158,7 @@ class ProfilesMobileFragment : Fragment() {
                 when (items[which]) {
                     getString(R.string.profile_action_switch) -> selectProfile(profile)
                     getString(R.string.profile_action_rename) -> showRenameDialog(profile)
+                    getString(R.string.profile_action_color) -> showColorDialog(profile)
                     getString(R.string.profile_action_delete) -> showDeleteConfirmDialog(profile)
                 }
             }
@@ -189,6 +209,17 @@ class ProfilesMobileFragment : Fragment() {
             }
             .setNegativeButton(android.R.string.cancel, null)
             .show()
+    }
+
+    private fun showColorDialog(profile: Profile) {
+        ProfileColorPicker.show(requireContext(), profile.avatarColor) { color ->
+            viewLifecycleOwner.lifecycleScope.launch {
+                if (ProfileManager.setProfileColor(profile.id, color)) {
+                    Toast.makeText(requireContext(), R.string.profile_color_changed, Toast.LENGTH_SHORT).show()
+                    if (profile.id == ProfileManager.activeProfileId) requireActivity().recreate()
+                }
+            }
+        }
     }
 
     private fun showDeleteConfirmDialog(profile: Profile) {

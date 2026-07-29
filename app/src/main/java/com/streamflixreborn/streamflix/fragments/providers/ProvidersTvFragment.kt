@@ -184,17 +184,10 @@ class ProvidersTvFragment : Fragment() {
         binding.llProfile.apply {
             val profile = ProfileManager.activeProfile
             if (profile != null) {
-                val colors = intArrayOf(
-                    0xFF1E88E5.toInt(), 0xFF43A047.toInt(), 0xFFE53935.toInt(),
-                    0xFFFB8C00.toInt(), 0xFF8E24AA.toInt(), 0xFF00ACC1.toInt(),
-                    0xFFD81B60.toInt(), 0xFF3949AB.toInt(), 0xFF6D4C41.toInt(),
-                    0xFF546E7A.toInt(),
-                )
-                val color = colors[profile.position.coerceAtLeast(0) % colors.size]
                 val drawable = GradientDrawable().apply {
                     shape = GradientDrawable.RECTANGLE
                     cornerRadius = 8f * binding.ivProfileAvatar.resources.displayMetrics.density
-                    setColor(color)
+                    setColor(profile.avatarColor)
                 }
                 binding.ivProfileAvatar.setImageDrawable(drawable)
                 binding.tvProfileInitial.text = profile.name.firstOrNull()?.uppercase() ?: "?"

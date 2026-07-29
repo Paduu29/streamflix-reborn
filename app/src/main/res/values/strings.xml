@@ -14,6 +14,9 @@
     <string name="profile_manage_title">Manage Profiles</string>
     <string name="profile_create_title">New Profile</string>
     <string name="profile_rename_title">Rename Profile</string>
+    <string name="profile_action_color">Change color</string>
+    <string name="profile_color_title">Profile color</string>
+    <string name="profile_color_changed">Profile color changed</string>
     <string name="profile_delete_title">Delete Profile</string>
     <string name="profile_delete_message">Are you sure you want to delete \"%s\"?</string>
     <string name="profile_name_hint">Profile name</string>

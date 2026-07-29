@@ -65,6 +65,7 @@ import com.streamflixreborn.streamflix.utils.DnsResolver
 import com.streamflixreborn.streamflix.utils.ProviderChangeNotifier
 import com.streamflixreborn.streamflix.utils.QrUtils
 import com.streamflixreborn.streamflix.models.Profile
+import com.streamflixreborn.streamflix.utils.ProfileColorPicker
 import com.streamflixreborn.streamflix.utils.ProfileManager
 import com.streamflixreborn.streamflix.utils.ThemeManager
 import com.streamflixreborn.streamflix.utils.UserDataCache
@@ -2175,6 +2176,7 @@ class SettingsTvFragment : LeanbackPreferenceFragmentCompat() {
         val items = mutableListOf<String>().apply {
             add(getString(R.string.profile_action_switch))
             add(getString(R.string.profile_action_rename))
+            add(getString(R.string.profile_action_color))
             if (profileCount > 1) {
                 add(getString(R.string.profile_action_delete))
             }
@@ -2186,19 +2188,22 @@ class SettingsTvFragment : LeanbackPreferenceFragmentCompat() {
                     getString(R.string.profile_action_switch) -> {
                         val oldProfileId = ProfileManager.activeProfileId
                         val oldLang = oldProfileId?.let { AppLanguageManager.getProfileLanguage(requireContext(), it) }
-                        ProfileManager.switchToProfile(profile.id)
-                        val newLang = AppLanguageManager.getProfileLanguage(requireContext(), profile.id)
-                        if (newLang != (oldLang ?: AppLanguageManager.SYSTEM_LANGUAGE)) {
-                            requireActivity().apply {
-                                finish()
-                                startActivity(Intent(this, this::class.java))
+                        lifecycleScope.launch {
+                            ProfileManager.switchToProfile(profile.id)
+                            val newLang = AppLanguageManager.getProfileLanguage(requireContext(), profile.id)
+                            if (newLang != (oldLang ?: AppLanguageManager.SYSTEM_LANGUAGE)) {
+                                requireActivity().apply {
+                                    finish()
+                                    startActivity(Intent(this, this::class.java))
+                                }
+                            } else {
+                                (requireActivity() as? MainTvActivity)
+                                    ?.recreateProviderHome()
                             }
-                        } else {
-                            (requireActivity() as? MainTvActivity)
-                                ?.recreateProviderHome()
                         }
                     }
                     getString(R.string.profile_action_rename) -> showRenameProfileDialogTv(profile)
+                    getString(R.string.profile_action_color) -> showProfileColorDialogTv(profile)
                     getString(R.string.profile_action_delete) -> showDeleteProfileDialogTv(profile)
                 }
             }
@@ -2228,5 +2233,16 @@ class SettingsTvFragment : LeanbackPreferenceFragmentCompat() {
             }
             .setNegativeButton(android.R.string.cancel, null)
             .show()
+    }
+
+    private fun showProfileColorDialogTv(profile: Profile) {
+        ProfileColorPicker.show(requireContext(), profile.avatarColor) { color ->
+            lifecycleScope.launch {
+                if (ProfileManager.setProfileColor(profile.id, color)) {
+                    Toast.makeText(requireContext(), R.string.profile_color_changed, Toast.LENGTH_SHORT).show()
+                    if (profile.id == ProfileManager.activeProfileId) requireActivity().recreate()
+                }
+            }
+        }
     }
 }

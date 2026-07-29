@@ -4,15 +4,16 @@ import android.app.Application
 import android.util.Log
 import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
-import com.streamflixreborn.streamflix.models.Profile
-import com.streamflixreborn.streamflix.utils.ProfileManager
 import kotlinx.coroutines.Dispatchers
-import kotlinx.coroutines.withContext
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
+import kotlinx.coroutines.CancellationException
+import com.streamflixreborn.streamflix.models.Profile
+import com.streamflixreborn.streamflix.utils.ProfileManager
 
 class ProfilesViewModel(application: Application) : AndroidViewModel(application) {
 
@@ -34,6 +35,8 @@ class ProfilesViewModel(application: Application) : AndroidViewModel(application
                     _profiles.value = profileList
                     _isLoading.value = false
                 }
+            } catch (e: CancellationException) {
+                throw e
             } catch (e: Exception) {
                 Log.e("ProfilesViewModel", "Error loading profiles", e)
                 _isLoading.value = false
@@ -42,7 +45,9 @@ class ProfilesViewModel(application: Application) : AndroidViewModel(application
     }
 
     fun switchToProfile(profileId: String) {
-        ProfileManager.switchToProfile(profileId)
+        viewModelScope.launch(Dispatchers.IO) {
+            ProfileManager.switchToProfile(profileId)
+        }
     }
 
     fun createProfile(name: String, onResult: (Profile?) -> Unit) {

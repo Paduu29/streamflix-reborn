@@ -19,13 +19,6 @@ class ProfileAdapter(
     private val layoutResId: Int = R.layout.item_profile_mobile,
 ) : ListAdapter<Profile, ProfileAdapter.ProfileViewHolder>(DiffCallback) {
 
-    private val fallbackColors = intArrayOf(
-        0xFF1E88E5.toInt(), 0xFF43A047.toInt(), 0xFFE53935.toInt(),
-        0xFFFB8C00.toInt(), 0xFF8E24AA.toInt(), 0xFF00ACC1.toInt(),
-        0xFFD81B60.toInt(), 0xFF3949AB.toInt(), 0xFF6D4C41.toInt(),
-        0xFF546E7A.toInt(),
-    )
-
     override fun onCreateViewHolder(parent: ViewGroup, viewType: Int): ProfileViewHolder {
         val root = LayoutInflater.from(parent.context).inflate(layoutResId, parent, false)
         return ProfileViewHolder(root)
@@ -46,15 +39,7 @@ class ProfileAdapter(
             val drawable = GradientDrawable().apply {
                 shape = GradientDrawable.RECTANGLE
                 cornerRadius = 8f * itemView.resources.displayMetrics.density
-                // Profiles created before avatar colors were assigned all have
-                // the original blue default. Use their stable position so the
-                // existing profile list is not rendered as three identical avatars.
-                val color = if (profile.avatarColor == fallbackColors.first()) {
-                    fallbackColors[profile.position % fallbackColors.size]
-                } else {
-                    profile.avatarColor
-                }
-                setColor(color)
+                setColor(profile.avatarColor)
             }
             ivProfileAvatar.setImageDrawable(drawable)
 

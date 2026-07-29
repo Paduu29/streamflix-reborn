@@ -16,13 +16,20 @@ object ProfileManager {
     private const val TAG = "ProfileManager"
     private const val GLOBAL_PREFS_NAME = "${BuildConfig.APPLICATION_ID}.profile_global"
     private const val KEY_ACTIVE_PROFILE_ID = "ACTIVE_PROFILE_ID"
+    private const val KEY_PROFILE_COLOR_MIGRATED = "PROFILE_COLOR_MIGRATED"
     private const val DEFAULT_PROFILE_ID = "default"
     private val profileColors = intArrayOf(
         0xFF1E88E5.toInt(), 0xFF43A047.toInt(), 0xFFE53935.toInt(),
         0xFFFB8C00.toInt(), 0xFF8E24AA.toInt(), 0xFF00ACC1.toInt(),
         0xFFD81B60.toInt(), 0xFF3949AB.toInt(), 0xFF6D4C41.toInt(),
         0xFF546E7A.toInt(),
+        0xFF00897B.toInt(), 0xFF7CB342.toInt(), 0xFFC0CA33.toInt(),
+        0xFFFDD835.toInt(), 0xFFFFB300.toInt(), 0xFFF4511E.toInt(),
+        0xFF5E35B1.toInt(), 0xFF039BE5.toInt(), 0xFFEC407A.toInt(),
+        0xFFAD1457.toInt(),
     )
+
+    val profileColorOptions: List<Int> get() = profileColors.toList()
 
     private lateinit var appContext: Context
     private var profileDao: ProfileDao? = null
@@ -64,6 +71,7 @@ object ProfileManager {
             }
         }
 
+        migrateLegacyProfileColors()
         applyActiveProfilePrefs()
         Log.i(TAG, "Initialized. Active profile: ${_activeProfile?.name} (${_activeProfile?.id})")
     }
@@ -157,33 +165,65 @@ object ProfileManager {
         Log.i(TAG, "Migrated $migratedCount legacy databases to profile: $DEFAULT_PROFILE_ID")
     }
 
-    fun switchToProfile(profileId: String, preserveProvider: Boolean = true) {
-        kotlinx.coroutines.runBlocking {
-            val profile = profileDao?.getProfileById(profileId)
-            if (profile == null) {
-                Log.e(TAG, "Cannot switch to non-existent profile: $profileId")
-                return@runBlocking
+    private fun migrateLegacyProfileColors() {
+        if (globalPrefs?.getBoolean(KEY_PROFILE_COLOR_MIGRATED, false) == true) return
+
+        val profiles = runCatching {
+            kotlinx.coroutines.runBlocking {
+                profileDao?.getAllProfilesList().orEmpty()
             }
+        }.getOrDefault(emptyList())
 
-            val currentProviderName = if (preserveProvider) UserPreferences.getCurrentProviderName() else null
-
-            AppDatabase.resetInstance()
-            UserDataCache.clearAll(appContext)
-
-            _activeProfile = profile
-            globalPrefs?.edit()?.putString(KEY_ACTIVE_PROFILE_ID, profileId)?.apply()
-
-            applyActiveProfilePrefs()
-
-            if (preserveProvider && currentProviderName != UserPreferences.getCurrentProviderName()) {
-                UserPreferences.setCurrentProviderName(currentProviderName)
+        var migratedCount = 0
+        profiles.forEach { profile ->
+            if (profile.avatarColor == profileColors.first()) {
+                val migratedColor = profileColors[profile.position.coerceAtLeast(0) % profileColors.size]
+                if (migratedColor != profile.avatarColor) {
+                    runCatching {
+                        kotlinx.coroutines.runBlocking {
+                            profileDao?.update(profile.copy(avatarColor = migratedColor))
+                        }
+                    }.onSuccess {
+                        if (profile.id == _activeProfile?.id) {
+                            _activeProfile = profile.copy(avatarColor = migratedColor)
+                        }
+                        migratedCount++
+                    }.onFailure { error ->
+                        Log.w(TAG, "Failed to migrate color for profile ${profile.id}", error)
+                    }
+                }
             }
-            // A profile switch changes the database and cached user data even
-            // when the selected provider remains the same. Refresh all active
-            // provider screens, especially Home, in that case as well.
-            ProviderChangeNotifier.notifyProviderChanged()
-            Log.i(TAG, "Switched to profile: ${profile.name} (${profile.id})")
         }
+
+        globalPrefs?.edit()?.putBoolean(KEY_PROFILE_COLOR_MIGRATED, true)?.apply()
+        Log.i(TAG, "Migrated $migratedCount legacy profile colors")
+    }
+
+    suspend fun switchToProfile(profileId: String, preserveProvider: Boolean = true) {
+        val profile = profileDao?.getProfileById(profileId)
+        if (profile == null) {
+            Log.e(TAG, "Cannot switch to non-existent profile: $profileId")
+            return
+        }
+
+        val currentProviderName = if (preserveProvider) UserPreferences.getCurrentProviderName() else null
+
+        AppDatabase.resetInstance()
+        UserDataCache.clearAll(appContext)
+
+        _activeProfile = profile
+        globalPrefs?.edit()?.putString(KEY_ACTIVE_PROFILE_ID, profileId)?.apply()
+
+        applyActiveProfilePrefs()
+
+        if (preserveProvider && currentProviderName != UserPreferences.getCurrentProviderName()) {
+            UserPreferences.setCurrentProviderName(currentProviderName)
+        }
+        // A profile switch changes the database and cached user data even
+        // when the selected provider remains the same. Refresh all active
+        // provider screens, especially Home, in that case as well.
+        ProviderChangeNotifier.notifyProviderChanged()
+        Log.i(TAG, "Switched to profile: ${profile.name} (${profile.id})")
     }
 
     private fun applyActiveProfilePrefs() {
@@ -226,6 +266,18 @@ object ProfileManager {
             _activeProfile = updated
         }
         Log.i(TAG, "Renamed profile $id to: $newName")
+        return true
+    }
+
+    suspend fun setProfileColor(id: String, color: Int): Boolean {
+        if (color !in profileColors) return false
+        val profile = profileDao?.getProfileById(id) ?: return false
+        val updated = profile.copy(avatarColor = color)
+        profileDao?.update(updated)
+        if (id == _activeProfile?.id) {
+            _activeProfile = updated
+        }
+        Log.i(TAG, "Changed profile color for $id")
         return true
     }
 
