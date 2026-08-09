@@ -48,6 +48,7 @@ import com.streamflixreborn.streamflix.utils.DnsResolver
 import kotlin.coroutines.suspendCoroutine
 import com.streamflixreborn.streamflix.utils.ProfileColorPicker
 import com.streamflixreborn.streamflix.utils.ProfileManager
+import com.streamflixreborn.streamflix.utils.ProfileSwitchPinGuard
 import com.streamflixreborn.streamflix.utils.ProviderChangeNotifier
 import com.streamflixreborn.streamflix.utils.ThemeManager
 import com.streamflixreborn.streamflix.utils.UserDataCache
@@ -1348,19 +1349,11 @@ class SettingsMobileFragment : PreferenceFragmentCompat() {
             .setItems(items.toTypedArray()) { _, which ->
                 when (items[which]) {
                     getString(R.string.profile_action_switch) -> {
-                        val oldProfileId = ProfileManager.activeProfileId
-                        val oldLang = oldProfileId?.let { AppLanguageManager.getProfileLanguage(requireContext(), it) }
-                        lifecycleScope.launch {
-                            ProfileManager.switchToProfile(profile.id)
-                            val newLang = AppLanguageManager.getProfileLanguage(requireContext(), profile.id)
-                            if (newLang != (oldLang ?: AppLanguageManager.SYSTEM_LANGUAGE)) {
-                                requireActivity().apply {
-                                    finish()
-                                    startActivity(Intent(this, this::class.java))
-                                }
-                            } else {
-                                (requireActivity() as? MainMobileActivity)
-                                    ?.recreateProviderHome()
+                        if (profile.id == ProfileManager.activeProfileId) {
+                            switchProfileFromSettings(profile)
+                        } else {
+                            ProfileSwitchPinGuard.verifyCurrentProfile(requireContext()) {
+                                switchProfileFromSettings(profile)
                             }
                         }
                     }
@@ -1371,6 +1364,24 @@ class SettingsMobileFragment : PreferenceFragmentCompat() {
             }
             .setNegativeButton(android.R.string.cancel, null)
             .show()
+    }
+
+    private fun switchProfileFromSettings(profile: com.streamflixreborn.streamflix.models.Profile) {
+        if (!isAdded) return
+        val oldProfileId = ProfileManager.activeProfileId
+        val oldLang = oldProfileId?.let { AppLanguageManager.getProfileLanguage(requireContext(), it) }
+        lifecycleScope.launch {
+            ProfileManager.switchToProfile(profile.id)
+            val newLang = AppLanguageManager.getProfileLanguage(requireContext(), profile.id)
+            if (newLang != (oldLang ?: AppLanguageManager.SYSTEM_LANGUAGE)) {
+                requireActivity().apply {
+                    finish()
+                    startActivity(Intent(this, this::class.java))
+                }
+            } else {
+                (requireActivity() as? MainMobileActivity)?.recreateProviderHome()
+            }
+        }
     }
 
     private fun showCreateProfileDialog() {

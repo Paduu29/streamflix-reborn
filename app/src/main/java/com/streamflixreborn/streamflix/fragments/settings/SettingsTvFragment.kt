@@ -67,6 +67,7 @@ import com.streamflixreborn.streamflix.utils.QrUtils
 import com.streamflixreborn.streamflix.models.Profile
 import com.streamflixreborn.streamflix.utils.ProfileColorPicker
 import com.streamflixreborn.streamflix.utils.ProfileManager
+import com.streamflixreborn.streamflix.utils.ProfileSwitchPinGuard
 import com.streamflixreborn.streamflix.utils.ThemeManager
 import com.streamflixreborn.streamflix.utils.UserDataCache
 import com.streamflixreborn.streamflix.utils.UserPreferences
@@ -2186,19 +2187,11 @@ class SettingsTvFragment : LeanbackPreferenceFragmentCompat() {
             .setItems(items.toTypedArray()) { _, which ->
                 when (items[which]) {
                     getString(R.string.profile_action_switch) -> {
-                        val oldProfileId = ProfileManager.activeProfileId
-                        val oldLang = oldProfileId?.let { AppLanguageManager.getProfileLanguage(requireContext(), it) }
-                        lifecycleScope.launch {
-                            ProfileManager.switchToProfile(profile.id)
-                            val newLang = AppLanguageManager.getProfileLanguage(requireContext(), profile.id)
-                            if (newLang != (oldLang ?: AppLanguageManager.SYSTEM_LANGUAGE)) {
-                                requireActivity().apply {
-                                    finish()
-                                    startActivity(Intent(this, this::class.java))
-                                }
-                            } else {
-                                (requireActivity() as? MainTvActivity)
-                                    ?.recreateProviderHome()
+                        if (profile.id == ProfileManager.activeProfileId) {
+                            switchProfileFromSettings(profile)
+                        } else {
+                            ProfileSwitchPinGuard.verifyCurrentProfile(requireContext()) {
+                                switchProfileFromSettings(profile)
                             }
                         }
                     }
@@ -2209,6 +2202,24 @@ class SettingsTvFragment : LeanbackPreferenceFragmentCompat() {
             }
             .setNegativeButton(android.R.string.cancel, null)
             .show()
+    }
+
+    private fun switchProfileFromSettings(profile: Profile) {
+        if (!isAdded) return
+        val oldProfileId = ProfileManager.activeProfileId
+        val oldLang = oldProfileId?.let { AppLanguageManager.getProfileLanguage(requireContext(), it) }
+        lifecycleScope.launch {
+            ProfileManager.switchToProfile(profile.id)
+            val newLang = AppLanguageManager.getProfileLanguage(requireContext(), profile.id)
+            if (newLang != (oldLang ?: AppLanguageManager.SYSTEM_LANGUAGE)) {
+                requireActivity().apply {
+                    finish()
+                    startActivity(Intent(this, this::class.java))
+                }
+            } else {
+                (requireActivity() as? MainTvActivity)?.recreateProviderHome()
+            }
+        }
     }
 
     private fun showDeleteProfileDialogTv(profile: Profile) {

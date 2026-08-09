@@ -512,6 +512,8 @@
     <string name="profile_delete_message">هل أنت متأكد أنك تريد حذف "%s"؟</string>
     <string name="profile_name_hint">اسم الملف الشخصي</string>
     <string name="profile_action_switch">التبديل إلى هذا الملف الشخصي</string>
+    <string name="profile_switch_pin_title">أدخل رمز PIN للملف الشخصي</string>
+    <string name="profile_switch_pin_message">أدخل رمز PIN الأبوي للملف الشخصي الحالي للتبديل بين الملفات الشخصية.</string>
     <string name="profile_action_rename">إعادة تسمية</string>
     <string name="profile_action_delete">حذف</string>
     <string name="profile_created">تم إنشاء الملف الشخصي</string>

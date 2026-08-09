@@ -20,6 +20,7 @@ import com.streamflixreborn.streamflix.models.Profile
 import com.streamflixreborn.streamflix.utils.AppLanguageManager
 import com.streamflixreborn.streamflix.utils.ProfileColorPicker
 import com.streamflixreborn.streamflix.utils.ProfileManager
+import com.streamflixreborn.streamflix.utils.ProfileSwitchPinGuard
 import com.streamflixreborn.streamflix.utils.UserPreferences
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.CancellationException
@@ -88,13 +89,21 @@ class ProfilesTvFragment : Fragment() {
 
     private fun selectProfile(profile: Profile) {
         if (isSwitchingProfile) return
-        val oldProfileId = ProfileManager.activeProfileId
-        val oldLang = oldProfileId?.let { AppLanguageManager.getProfileLanguage(requireContext(), it) }
         val cameFromProviders = findNavController().previousBackStackEntry?.destination?.id == R.id.providers
         if (profile.id == ProfileManager.activeProfileId) {
             navigateToNext(cameFromProviders)
             return
         }
+
+        ProfileSwitchPinGuard.verifyCurrentProfile(requireContext()) {
+            switchToProfile(profile, cameFromProviders)
+        }
+    }
+
+    private fun switchToProfile(profile: Profile, cameFromProviders: Boolean) {
+        if (isSwitchingProfile || !isAdded) return
+        val oldProfileId = ProfileManager.activeProfileId
+        val oldLang = oldProfileId?.let { AppLanguageManager.getProfileLanguage(requireContext(), it) }
         isSwitchingProfile = true
         viewLifecycleOwner.lifecycleScope.launch {
             try {

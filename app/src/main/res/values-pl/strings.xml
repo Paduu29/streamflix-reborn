@@ -178,6 +178,8 @@
     <string name="profile_delete_message">Czy na pewno chcesz usunąć "%s"?</string>
     <string name="profile_name_hint">Nazwa profilu</string>
     <string name="profile_action_switch">Przełącz na ten profil</string>
+    <string name="profile_switch_pin_title">Wprowadź PIN profilu</string>
+    <string name="profile_switch_pin_message">Wprowadź rodzicielski PIN bieżącego profilu, aby przełączyć profil.</string>
     <string name="profile_action_rename">Zmień nazwę</string>
     <string name="profile_action_delete">Usuń</string>
     <string name="profile_created">Profil utworzony</string>

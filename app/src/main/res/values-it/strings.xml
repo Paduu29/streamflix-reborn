@@ -517,6 +517,8 @@
     <string name="profile_delete_message">Sei sicuro di voler eliminare "%s"?</string>
     <string name="profile_name_hint">Nome profilo</string>
     <string name="profile_action_switch">Passa a questo profilo</string>
+    <string name="profile_switch_pin_title">Inserisci il PIN del profilo</string>
+    <string name="profile_switch_pin_message">Inserisci il PIN genitore del profilo attuale per cambiare profilo.</string>
     <string name="profile_action_rename">Rinomina</string>
     <string name="profile_action_delete">Elimina</string>
     <string name="profile_created">Profilo creato</string>

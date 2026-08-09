@@ -519,6 +519,8 @@
     <string name="profile_delete_message">Êtes-vous sûr de vouloir supprimer "%s" ?</string>
     <string name="profile_name_hint">Nom du profil</string>
     <string name="profile_action_switch">Passer à ce profil</string>
+    <string name="profile_switch_pin_title">Saisir le code PIN du profil</string>
+    <string name="profile_switch_pin_message">Saisissez le code PIN parental du profil actuel pour changer de profil.</string>
     <string name="profile_action_rename">Renommer</string>
     <string name="profile_action_delete">Supprimer</string>
     <string name="profile_created">Profil créé</string>

@@ -508,6 +508,8 @@
     <string name="profile_delete_message">Bist du sicher, dass du "%s" löschen möchtest?</string>
     <string name="profile_name_hint">Profilname</string>
     <string name="profile_action_switch">Zu diesem Profil wechseln</string>
+    <string name="profile_switch_pin_title">Profil-PIN eingeben</string>
+    <string name="profile_switch_pin_message">Gib die Eltern-PIN des aktuellen Profils ein, um das Profil zu wechseln.</string>
     <string name="profile_action_rename">Umbenennen</string>
     <string name="profile_action_delete">Löschen</string>
     <string name="profile_created">Profil erstellt</string>
