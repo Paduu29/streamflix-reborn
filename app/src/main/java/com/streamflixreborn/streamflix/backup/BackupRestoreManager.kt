@@ -134,9 +134,9 @@ class BackupRestoreManager(
             val providersArray = JSONArray()
             for (p in providers) {
                 val moviesToExport = p.movieDao.getAll()
-                    .filter { it.isWatched || it.watchedDate != null || it.watchHistory != null || it.isFavorite }
+                    .filter { it.isWatched || it.watchedDate != null || it.watchHistory != null || it.isFavorite || it.lastPlayedAtMillis != null }
                 val tvShowsToExport = p.tvShowDao.getAllForBackup()
-                    .filter { it.isWatching || it.isFavorite }
+                    .filter { it.isWatching || it.isFavorite || it.lastPlayedAtMillis != null }
                 val episodesToExport = p.episodeDao.getAllForBackup()
                     .filter { it.isWatched || it.watchedDate != null || it.watchHistory != null }
 
@@ -159,6 +159,7 @@ class BackupRestoreManager(
                         put("isWatched", movie.isWatched)
                         put("watchedDate", movie.watchedDate?.timeInMillis ?: JSONObject.NULL)
                         put("watchHistory", movie.watchHistory?.toJson() ?: JSONObject.NULL)
+                        put("lastPlayedAtMillis", movie.lastPlayedAtMillis ?: JSONObject.NULL)
                     }
                     moviesArray.put(obj)
                     Log.d(TAG, "EXPORT: [${p.name}] Movie: ${movie.title} (Fav: ${movie.isFavorite})")
@@ -175,6 +176,8 @@ class BackupRestoreManager(
                         put("isFavorite", show.isFavorite)
                         put("favoritedAtMillis", show.favoritedAtMillis ?: JSONObject.NULL)
                         put("isWatching", show.isWatching)
+                        put("lastPlayedAtMillis", show.lastPlayedAtMillis ?: JSONObject.NULL)
+                        put("lastPlayedEpisodeId", show.lastPlayedEpisodeId ?: JSONObject.NULL)
                     }
                     tvShowsArray.put(obj)
                     Log.d(TAG, "EXPORT: [${p.name}] TV Show: ${show.title} (Fav: ${show.isFavorite})")
@@ -281,7 +284,9 @@ class BackupRestoreManager(
                         val s = arr.optJSONObject(j) ?: continue
                         val isFavorite = s.optBoolean("isFavorite", false)
                         val favoritedAtMillis = s.optLongOrNull("favoritedAtMillis")
-                        val isWatching = s.optBoolean("isWatching", false)
+                        val isWatching = s.optBoolean("isWatching", false) // Corretto il default a false
+                        val lastPlayedAtMillis = s.optLongOrNull("lastPlayedAtMillis")
+                        val lastPlayedEpisodeId = s.optStringOrNull("lastPlayedEpisodeId")
 
                         val tvShow = TvShow(
                             id = s.optString("id", ""),
@@ -292,6 +297,8 @@ class BackupRestoreManager(
                             this.isFavorite = isFavorite
                             this.favoritedAtMillis = favoritedAtMillis
                             this.isWatching = isWatching
+                            this.lastPlayedAtMillis = lastPlayedAtMillis
+                            this.lastPlayedEpisodeId = lastPlayedEpisodeId
                         }
                         providerCtx.tvShowDao.save(tvShow)
                         Log.d(TAG, "IMPORT: [${providerName}] TV Show: ${tvShow.title}. Favorites: $isFavorite, Watching: $isWatching")
@@ -306,6 +313,7 @@ class BackupRestoreManager(
                         val isWatched = m.optBoolean("isWatched", false)
                         val watchedDate = m.optLongOrNull("watchedDate")?.toCalendar()
                         val watchHistory = m.optJSONObject("watchHistory")?.toWatchHistory()
+                        val lastPlayedAtMillis = m.optLongOrNull("lastPlayedAtMillis")
 
                         val movie = Movie(
                             id = m.optString("id", ""),
@@ -318,6 +326,7 @@ class BackupRestoreManager(
                             this.isWatched = isWatched
                             this.watchedDate = watchedDate
                             this.watchHistory = watchHistory
+                            this.lastPlayedAtMillis = lastPlayedAtMillis
                         }
                         providerCtx.movieDao.save(movie)
                         Log.d(TAG, "IMPORT: [${providerName}] Movie: ${movie.title}. Favorites: $isFavorite, Watched: $isWatched, History: ${watchHistory != null}")

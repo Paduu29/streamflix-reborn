@@ -59,6 +59,7 @@
 
     <string name="home_swiper_watch_now">Ver ahora</string>
     <string name="home_continue_watching">Continuar viendo</string>
+    <string name="home_recently_watched">Visto recientemente</string>
     <string name="home_favorite_movies">Películas favoritas</string>
     <string name="home_favorite_tv_shows">Series favoritas</string>
 
@@ -535,4 +536,6 @@
     <string name="settings_profile_edit_summary">Renombrar el perfil actual</string>
     <string name="settings_profile_manage_summary">Ver, renombrar o eliminar perfiles</string>
     <string name="settings_profile_add_summary">Crear un nuevo perfil</string>
+    <string name="supabase_instructions_title">Instrucciones</string>
+    <string name="supabase_instructions_summary">Abrir en el navegador la guía detallada para configurar la cuenta y la sincronización de Supabase</string>
 </resources>
